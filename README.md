@@ -4,14 +4,17 @@ A testing ground for agentic coding. Each coding agent is given the same 27 depe
 
 Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is a **new CLI process** with no chat history; the agent's only memory is the files it wrote. Work happens in a local Git repository with no remotes.
 
-> Status: the harness is under active development. Hidden acceptance tests, container isolation, cross-run comparison, packaging and the parallel tracks are planned but not built yet.
+Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
+
+> Status: the harness is under active development. Hidden acceptance tests, cross-run comparison, packaging and the parallel tracks are planned but not built yet.
 
 ## Quick start (Ubuntu)
 
 ```bash
-sudo apt update && sudo apt install -y python3 git tmux
+sudo apt update && sudo apt install -y python3 git tmux podman
 python3 -m unittest discover -s harness_tests -v
-python3 run.py doctor                                  # CLIs, versions, profiles
+python3 run.py build-image                             # once: build the agent sandbox image
+python3 run.py doctor                                  # CLIs, versions, image, profiles
 python3 run.py run --profile claude-sonnet --dry-run   # show the command, call nothing
 python3 run.py run --profile claude-sonnet --max-phases 1
 # after the smoke test:
@@ -40,6 +43,8 @@ A profile is a named combination of CLI, model and settings in `benchmark.json`.
 | `max_turns` | Claude only; `null` leaves the CLI's own limit |
 | `extra_args` | Extra CLI arguments |
 | `env` | Extra environment variables for the CLI process |
+| `host_ports` | Host loopback ports the container may reach, e.g. `[8080]` for a local model server |
+| `cpus`, `memory` | Optional container limits, e.g. `4` and `8g` |
 
 Local models are any OpenAI-compatible endpoint (llama.cpp, Ollama, LM Studio) registered as a provider in your opencode configuration; the profile names it as `provider/model`.
 
@@ -55,6 +60,7 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
   state.json        authoritative runner state
   report.json       progress, failure classes, tokens, cost, time
   workspace/        the agent's local Git repository (no remotes)
+  home/             the container's home directory; holds a copy of the CLI login, never publish it
   logs/*.jsonl      full raw CLI events (may contain sensitive text)
   handoff-archive/  handoffs from retried phases
 ```
@@ -65,14 +71,16 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
 
 ```bash
 python3 run.py doctor
+python3 run.py build-image
 python3 run.py init    --profile local-qwen
-python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--quiet] [--dry-run] [--allow-unsafe]
+python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--quiet] [--dry-run] [--refresh-login]
 python3 run.py report  --profile local-qwen
 python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --cycle 1
 ```
 
 - `--quiet` hides the live event summary; the full JSONL log is still written.
-- `--allow-unsafe` switches the CLI to its permissive mode with full file and network access. See [docs/SECURITY.md](docs/SECURITY.md) before using it.
+- `--refresh-login` copies your current host CLI login into the run again, for when the run's copy has expired.
+- `--no-container` runs the agent directly on the host instead of in the sandbox; `--allow-unsafe` then lets the CLI skip its permission prompts. Read [docs/SECURITY.md](docs/SECURITY.md) first. A run stays in the mode it started in.
 - `unblock` is an **operator intervention** and must be disclosed when comparing results. It keeps the code and Git history and resets the retry counter for one task.
 - Ctrl+C: stop between phases if possible. An interrupted phase leaves `inflight.json`, which is reported on the next start; the phase is then repeated.
 
@@ -86,6 +94,7 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 - `harness/core.py`: runner and CLI adapters.
 - `harness_tests/`: unit tests and an end-to-end test with a fake agent.
 - `acceptance/`: operator-owned baseline checks.
+- `container/Containerfile`: the agent sandbox image (Ubuntu 24.04, Python, Rust, Node, build tools).
 - `docs/`: [method](docs/BENCHMARK.md), [engineering notes](docs/HARNESS.md), [security](docs/SECURITY.md).
 
 ## What is and is not measured today
@@ -96,4 +105,8 @@ A task currently counts as done when the agent's own review says PASS and the ba
 
 ## Safety
 
-Agents run with ordinary filesystem access; a workspace is not a sandbox. Task specifications, skills and root agent instructions are checked against the originals after every phase and restored if changed. Run unattended benchmarks only in a disposable VM or container without valuable credentials.
+Each run has its own container. The agent is root inside it and may install anything, but it can only see its workspace, a private home directory and the read-only CLI binary. It has outbound internet access and cannot reach services on the host, apart from ports a profile lists in `host_ports`. The host's own CLI binaries are mounted in, so the container runs exactly the CLI version recorded in `run.json`.
+
+The agent does get a copy of the CLI login, and a container is not a VM. [docs/SECURITY.md](docs/SECURITY.md) lists what is and is not protected.
+
+Task specifications, skills and root agent instructions are checked against the originals after every phase and restored if changed.

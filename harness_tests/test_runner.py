@@ -1,4 +1,4 @@
-import unittest, tempfile, json, pathlib
+import unittest, tempfile, json, pathlib, sys
 from harness.core import specs, initial_state, ready, handoff_valid, adapter, usage, config, resolve_profile, choose_ready
 class RunnerTests(unittest.TestCase):
  def test_task_graph(self):
@@ -36,4 +36,28 @@ class RunnerTests(unittest.TestCase):
   self.assertEqual(usage('codex',turn+'\n'+turn)['tokens'],10)
   out='\n'.join(json.dumps(x) for x in ({'type':'system','subtype':'init','model':'m-1'},{'type':'result','total_cost_usd':0.5,'usage':{'input_tokens':4,'output_tokens':6}}))
   self.assertEqual(usage('claude',out),{'tokens':10,'cost_usd':0.5,'reported_model':'m-1'})
+ def test_container_commands(self):
+  from harness import core
+  cfg=config();cfg['runs_root']='/tmp/evo-test-runs'
+  run=core.Run('local-qwen',cfg=cfg,container=True)
+  run.profile['executable']=sys.executable
+  create=core.container_create_argv(run)
+  self.assertEqual(create[create.index('--network')+1],'pasta:--map-guest-addr,none,-T,8080')
+  self.assertIn(f'{run.workspace}:/workspace',create)
+  self.assertIn(f'{run.home}:/root',create)
+  self.assertTrue(any(x.endswith(':ro') for x in create))
+  self.assertFalse(any(str(core.ROOT) in x for x in create))
+  argv=core.phase_argv(run,'TASK-001','plan',1)
+  self.assertEqual(argv[:2],['podman','exec'])
+  self.assertEqual(argv[argv.index('timeout')+3],'7200')
+  self.assertIn('--auto',argv)
+  self.assertIn('WORKSPACE ROOT (absolute): /workspace',argv[-1])
+  self.assertIn('/workspace/tasks/TASK-001/handoffs/plan-cycle1.json',argv[-1])
+  self.assertNotIn(str(run.workspace),argv[-1])
+ def test_host_mode_has_no_container_wrapper(self):
+  from harness import core
+  cfg=config();cfg['runs_root']='/tmp/evo-test-runs'
+  run=core.Run('gpt-luna',cfg=cfg)
+  argv=core.phase_argv(run,'TASK-001','plan',1)
+  self.assertEqual(argv[0],'codex');self.assertIn('workspace-write',argv)
 if __name__=='__main__':unittest.main()

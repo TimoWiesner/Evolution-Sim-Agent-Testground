@@ -1,6 +1,7 @@
 # Harness engineering notes
 
 - A run is identified by profile, track and run id and lives at `<runs_root>/<profile>/<track>/<run-id>/`, outside the benchmark repository. `run.json` records the resolved profile settings, CLI version, harness commit and host hardware. Resuming a run whose profile settings have changed is refused.
+- Container isolation: one long-lived rootless Podman container per run (`evo-<profile>-<track>-<run-id>`), started on demand and stopped when `run` ends; each phase is a fresh `podman exec`. It is kept between invocations so agent-installed system packages usually survive; it is safe to delete (`podman rm`), the harness recreates it. Mounts: workspace at `/workspace`, `<run>/home` at `/root`, the host's CLI binary read-only under `/opt/evo-cli`. Network is `pasta` with the host mapping removed; `host_ports` forwards single host loopback ports (local model servers). The phase time limit is enforced by `timeout` inside the container. Validation, commits and acceptance checks run on the host.
 - The next task is chosen by the harness in a fixed order (started tasks first, then lowest ready ID), never by the model.
 
 - Each task phase gets a fresh CLI subprocess. All relevant context is loaded from workspace files and the explicit absolute handoff destination.

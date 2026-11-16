@@ -9,6 +9,12 @@
   "benchmark_test_timeout_seconds": 180,
   "git_author_name": "Evolution Benchmark",
   "git_author_email": "benchmark@localhost",
+  "container": {
+    "runtime": "podman",
+    "image": "evo-bench:1",
+    "cpus": null,
+    "memory": null
+  },
   "clis": {
     "claude": { "executable": "claude" },
     "codex": { "executable": "codex" },
@@ -19,7 +25,8 @@
     "phase_timeout_seconds": 1800,
     "max_turns": null,
     "extra_args": [],
-    "env": {}
+    "env": {},
+    "host_ports": []
   },
   "profiles": {
     "claude-opus": { "cli": "claude", "model": "opus" },
@@ -32,7 +39,8 @@
     "local-qwen": {
       "cli": "opencode",
       "model": "llama.cpp/qwen3.6-35b-a3b",
-      "phase_timeout_seconds": 7200
+      "phase_timeout_seconds": 7200,
+      "host_ports": [8080]
     }
   }
 }

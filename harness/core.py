@@ -18,6 +18,17 @@ BENCHMARK_VERSION = 1
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PHASES = ('plan', 'implement', 'review')
 TRACKS = ('sequential',)
+# Paths inside the agent container.
+CONTAINER_WS = '/workspace'
+CONTAINER_HOME = '/root'
+CONTAINER_CLI = '/opt/evo-cli'
+# Login/config files (relative to $HOME) copied into a run's private container home.
+LOGIN_FILES = {
+    'claude': ('.claude/.credentials.json',),
+    'codex': ('.codex/auth.json',),
+    'opencode': ('.config/opencode/opencode.jsonc','.config/opencode/opencode.json','.local/share/opencode/auth.json'),
+}
+LOGIN_REQUIRED = ('claude','codex')
 REQUIRED = ('summary','changed_files','decisions','tests','risks','next_steps','verdict','gaps')
 
 def read(path):
@@ -65,7 +76,7 @@ def fingerprint(profile):
 
 class Run:
     """One benchmark run: <runs_root>/<profile>/<track>/<run_id>/."""
-    def __init__(self, name, track='sequential', run_id='r1', cfg=None):
+    def __init__(self, name, track='sequential', run_id='r1', cfg=None, container=False):
         if track not in TRACKS: raise RuntimeError(f'Unknown track {track!r}')
         if not re.fullmatch(r'[A-Za-z0-9._-]+', run_id): raise RuntimeError(f'Invalid run id {run_id!r}')
         self.cfg = cfg or config()
@@ -77,6 +88,8 @@ class Run:
         self.workspace = self.base/'workspace'
         self.state = self.base/'state.json'
         self.meta = self.base/'run.json'
+        self.container = container
+        self.home = self.base/'home'   # container $HOME; holds copied logins, never publish it
 
 def initial_state():
     return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
@@ -107,6 +120,8 @@ def run_metadata(run):
     return {'benchmark_version':BENCHMARK_VERSION,'profile':run.name,'track':run.track,'run_id':run.run_id,
             'cli':run.cli,'model':run.profile['model'],'settings':run.profile,'fingerprint':fingerprint(run.profile),
             'cli_version':cli_version(run.profile['executable']),'harness_commit':harness_commit(),
+            'isolation':'container' if run.container else 'host',
+            'container_image':image_id(run.cfg) if run.container else None,
             'host':host_info(),'created':now()}
 
 def check_unchanged(run):
@@ -115,6 +130,90 @@ def check_unchanged(run):
     if stored['fingerprint'] != fingerprint(run.profile):
         raise RuntimeError(f'Profile {run.name!r} changed since this run started '
                            f'(was {stored["settings"]}). Start a new run with --run-id.')
+    mode = 'container' if run.container else 'host'
+    if stored.get('isolation','host') != mode:
+        raise RuntimeError(f'This run was started in {stored.get("isolation","host")} mode, not {mode} mode. '
+                           f'Start a new run with --run-id.')
+
+# --- container isolation -----------------------------------------------------
+
+def runtime(cfg):
+    return cfg['container']['runtime']
+
+def image_id(cfg):
+    p = subprocess.run([runtime(cfg),'image','inspect','-f','{{.Id}}',cfg['container']['image']],text=True,capture_output=True)
+    return p.stdout.strip() or None if p.returncode==0 else None
+
+def container_name(run):
+    return 'evo-' + re.sub(r'[^a-z0-9_.-]','-',f'{run.name}-{run.track}-{run.run_id}'.lower())
+
+def cli_mount(profile):
+    """Mount the host's CLI read-only so the container runs the recorded CLI version.
+
+    Returns (host source, container target, executable path inside the container)."""
+    tool = shutil.which(profile['executable'])
+    if not tool: raise RuntimeError(f'CLI not found on host: {profile["executable"]}')
+    real = pathlib.Path(tool).resolve()
+    target = f'{CONTAINER_CLI}/{profile["cli"]}'
+    package = real.parent.parent
+    home = pathlib.Path.home()
+    # A self-contained package folder (<pkg>/bin/<exe> plus resources) is mounted whole.
+    if real.parent.name == 'bin' and home in package.parents and package != home/'.local':
+        return package, target, f'{target}/bin/{real.name}'
+    inner = f'{target}/bin/{profile["cli"]}'
+    return real, inner, inner
+
+def network_arg(profile):
+    """Outbound internet only; host services are unreachable except explicitly listed loopback ports."""
+    return 'pasta:--map-guest-addr,none' + ''.join(f',-T,{int(p)}' for p in profile.get('host_ports') or [])
+
+def container_create_argv(run):
+    c = run.cfg['container']; p = run.profile; src, target, _ = cli_mount(p)
+    argv = [c['runtime'],'run','-d','--name',container_name(run),'--hostname','evo-sandbox','--stop-signal','SIGKILL',
+            '--network',network_arg(p),
+            '-v',f'{run.workspace}:{CONTAINER_WS}','-v',f'{run.home}:{CONTAINER_HOME}','-v',f'{src}:{target}:ro',
+            '-e','IS_SANDBOX=1','-e',f'HOME={CONTAINER_HOME}','-w',CONTAINER_WS]
+    for k in ('cpus','memory'):
+        v = p.get(k) or c.get(k)
+        if v: argv += [f'--{k}',str(v)]
+    return argv + [c['image'],'sleep','infinity']
+
+def container_exec_argv(run, argv, timeout):
+    """Wrap an adapter command; `timeout` inside the container kills the whole agent process tree."""
+    exe = cli_mount(run.profile)[2]
+    env = [x for k,v in (run.profile.get('env') or {}).items() for x in ('-e',f'{k}={v}')]
+    return [runtime(run.cfg),'exec',*env,'-w',CONTAINER_WS,container_name(run),
+            'timeout','-k','10',str(int(timeout)),exe,*argv[1:]]
+
+def copy_logins(run, refresh=False):
+    """Give the run its own copy of the CLI login; the rest of the host home stays invisible."""
+    found = False
+    for rel in LOGIN_FILES[run.cli]:
+        src = pathlib.Path.home()/rel; dest = run.home/rel
+        if src.is_file() and (refresh or not dest.exists()):
+            dest.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dest); dest.chmod(0o600)
+        found = found or dest.exists()
+    if run.cli in LOGIN_REQUIRED and not found:
+        raise RuntimeError(f'No {run.cli} login found on the host ({LOGIN_FILES[run.cli][0]}); log in with the CLI first.')
+
+def ensure_container(run, refresh_login=False):
+    rt = runtime(run.cfg); name = container_name(run)
+    run.home.mkdir(parents=True,exist_ok=True)
+    copy_logins(run,refresh_login)
+    if subprocess.run([rt,'container','exists',name]).returncode == 0:
+        state = subprocess.run([rt,'inspect','-f','{{.State.Running}}',name],text=True,capture_output=True).stdout.strip()
+        if state != 'true': subprocess.run([rt,'start',name],check=True,capture_output=True)
+        return
+    if not image_id(run.cfg):
+        raise RuntimeError(f'Container image {run.cfg["container"]["image"]} is missing; run: python3 run.py build-image')
+    p = subprocess.run(container_create_argv(run),text=True,capture_output=True)
+    if p.returncode: raise RuntimeError(f'Could not start container: {p.stderr[-800:]}')
+
+def stop_container(run):
+    subprocess.run([runtime(run.cfg),'stop','-t','2',container_name(run)],capture_output=True)
+
+def build_image(cfg):
+    return subprocess.run([runtime(cfg),'build','-t',cfg['container']['image'],'-f',str(ROOT/'container'/'Containerfile'),str(ROOT/'container')]).returncode
 
 # --- workspace integrity -----------------------------------------------------
 
@@ -321,11 +420,16 @@ def handoff_valid(path,task,phase,cycle):
 def external_checks(w,task,phase,timeout):
     return cmd([sys.executable,str(ROOT/'acceptance'/'checks.py'),str(w),task,phase],ROOT,timeout)
 
-def prompt_for(task,phase,cycle,w=None):
+SANDBOX_NOTE=('ENVIRONMENT: you are root inside a disposable Linux container (Ubuntu 24.04; Python 3, Rust, Node, build tools, xvfb). '
+              'You may install what you need. System packages installed with apt may NOT persist into later phases: '
+              'record every system dependency and its exact install command in docs/STATE.md and reinstall when missing. ')
+
+def prompt_for(task,phase,cycle,w=None,sandbox=False):
     if w is None: w=pathlib.Path.cwd()
-    w=pathlib.Path(w).resolve()
+    w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
+            + (SANDBOX_NOTE if sandbox else '') +
             f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. '
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
@@ -354,14 +458,21 @@ def error_class(r,ok,reason,integrity,check):
     if check['exit_code']!=0:return 'ACCEPTANCE_FAILURE'
     return None
 
-def execute_phase(run,state,task,unsafe=False,dry=False,live=True):
+def phase_argv(run,task,phase,cycle,unsafe=False):
+    """Full command for one phase: the CLI adapter plus prompt, wrapped for the container if used."""
+    timeout=run.profile['phase_timeout_seconds']
+    if run.container:
+        argv=adapter(run.profile,True)+[prompt_for(task,phase,cycle,CONTAINER_WS,sandbox=True)]
+        return container_exec_argv(run,argv,timeout)
+    return adapter(run.profile,unsafe)+[prompt_for(task,phase,cycle,run.workspace)]
+
+def execute_phase(run,state,task,unsafe=False,live=True):
     cfg=run.cfg;w=run.workspace;b=run.base;profile=run.profile
     ts=state['tasks'][task];phase=ts['phase'];cycle=ts['cycle']
     label=f'{task}-{phase}-{cycle}-attempt{ts["recovery"]}'
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
-    argv=adapter(profile,unsafe)
-    if dry:
-        print('DRY RUN',label,' '.join(argv));return False
+    argv=phase_argv(run,task,phase,cycle,unsafe)
+    if run.container:ensure_container(run)
     ensure_local_git(w)
     ok,reason=protected_ok(w)
     if not ok:raise RuntimeError('Workspace already changed protected file before phase: '+reason)
@@ -373,7 +484,13 @@ def execute_phase(run,state,task,unsafe=False,dry=False,live=True):
     # checkpoint before any agent process, survives power loss
     write(b/'inflight.json',{'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'started':now()})
     print(f'START {label} (cwd={w})',flush=True)
-    r=cmd(argv+[prompt_for(task,phase,cycle,w)],w,profile['phase_timeout_seconds'],logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=profile.get('env'))
+    limit=profile['phase_timeout_seconds']
+    if run.container:
+        # The in-container `timeout` enforces the limit (exit 124); the outer limit is only a backstop.
+        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live)
+        if r['exit_code']==124:r['timeout']=True
+    else:
+        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=profile.get('env'))
     hand_ok,reason=handoff_valid(hand,task,phase,cycle)
     intact,integrity_error=protected_ok(w)
     if not intact:reason='Protected benchmark spec modified: '+integrity_error
@@ -426,7 +543,7 @@ def report(run):
     counts={x:sum(v['status']==x for v in tasks.values()) for x in ('PENDING','ACTIVE','DONE','BLOCKED')}
     events=st['events'];classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
     reported=sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')})
-    result={'benchmark_version':meta['benchmark_version'],'profile':run.name,'track':run.track,'run_id':run.run_id,'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],'reported_models':reported,'harness_commit':meta['harness_commit'],'host':meta['host'],
+    result={'benchmark_version':meta['benchmark_version'],'isolation':meta.get('isolation','host'),'profile':run.name,'track':run.track,'run_id':run.run_id,'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],'reported_models':reported,'harness_commit':meta['harness_commit'],'host':meta['host'],
             'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),'phases_attempted':len(events),'failure_classes':classes,'reported_total_tokens':st['reported_tokens'] if st['tokens_complete'] else None,'reported_total_cost_usd':round(st['reported_cost_usd'],4) if st['cost_complete'] else None,'wall_seconds_agent_calls':round(st['spent_seconds'],2),'unreported_usage_warning':not(st['tokens_complete'] and st['cost_complete']),'tasks':tasks}
     manual=run.base/'manual-review.json'
     if manual.exists():result['manual_review']=read(manual)
@@ -448,6 +565,9 @@ def doctor(cfg):
     print('runs root:',runs_root(cfg))
     for name,v in cfg['clis'].items():
         print(f'cli {name}:',shutil.which(v['executable']) or 'NOT FOUND',' ',cli_version(v['executable']) or '')
+    c=cfg['container'];rt=shutil.which(c['runtime'])
+    print(f'container runtime {c["runtime"]}:',rt or 'NOT FOUND')
+    if rt:print(f'container image {c["image"]}:',image_id(cfg) or 'NOT BUILT (run: python3 run.py build-image)')
     print('profiles:')
     for name in sorted(cfg['profiles']):
         p=resolve_profile(cfg,name)
@@ -457,18 +577,29 @@ def main():
     cfg=config()
     p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
-    for name in ('doctor','init','run','report','unblock'):
+    for name in ('doctor','build-image','init','run','report','unblock'):
         q=sub.add_parser(name)
-        if name!='doctor':
+        if name not in ('doctor','build-image'):
             q.add_argument('--profile',choices=sorted(cfg['profiles']),required=True,help='named CLI + model combination from benchmark.json')
             q.add_argument('--track',choices=TRACKS,default='sequential')
             q.add_argument('--run-id',default='r1',help='distinguishes repeated runs of the same profile and track')
+        if name in ('init','run'):
+            q.add_argument('--no-container',action='store_true',help='run the agent directly on the host instead of in the sandbox container')
         if name=='run':
-            q.add_argument('--allow-unsafe',action='store_true');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
+            q.add_argument('--refresh-login',action='store_true',help='copy the host CLI login into the run again')
+            q.add_argument('--allow-unsafe',action='store_true',help='host mode only: let the CLI skip its permission prompts');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
         if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES);q.add_argument('--cycle',type=int)
     a=p.parse_args()
     if a.action=='doctor':doctor(cfg);return
-    run=Run(a.profile,a.track,a.run_id,cfg)
+    if a.action=='build-image':sys.exit(build_image(cfg))
+    run=Run(a.profile,a.track,a.run_id,cfg,container=not getattr(a,'no_container',False))
+    if a.action=='run' and a.dry_run:
+        st=read(run.state) if run.state.exists() else initial_state()
+        task=choose_ready(st)
+        if task:
+            ts=st['tasks'][task];print('DRY RUN',task,ts['phase'],'cycle',ts['cycle']);print(' '.join(phase_argv(run,task,ts['phase'],ts['cycle'],a.allow_unsafe)))
+            if run.container:print('container:',' '.join(container_create_argv(run)))
+        return
     if a.action=='init':print('Workspace:',init(run));return
     if a.action=='report':report(run);return
     if a.action=='unblock':
@@ -482,7 +613,8 @@ def main():
         b=run.base;w=run.workspace
         if not run.state.exists():init(run)
         check_unchanged(run)
-        if not a.dry_run and not shutil.which(run.profile['executable']):p.error('CLI missing')
+        if not shutil.which(run.profile['executable']):p.error('CLI missing')
+        if run.container and a.refresh_login:copy_logins(run,True)
         ensure_local_git(w)
         if (b/'inflight.json').exists():
             print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
@@ -495,9 +627,12 @@ def main():
             if cfg['max_tokens'] is not None and (not st['tokens_complete'] or st['reported_tokens']>=cfg['max_tokens']):print('token budget reached/unknown');break
             task=choose_ready(st)
             if not task:break
-            done=execute_phase(run,st,task,a.allow_unsafe,a.dry_run,not a.quiet)
-            if not done:break
+            try:execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
+            except BaseException:
+                if run.container:stop_container(run)
+                raise
             write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
+        if run.container:stop_container(run)
         report(run)
 
 if __name__=='__main__':main()
