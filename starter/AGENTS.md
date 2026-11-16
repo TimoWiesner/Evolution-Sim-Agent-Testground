@@ -15,7 +15,7 @@ You are implementing Evolution Simulation, a locally runnable grid-world ecologi
 - Ask no interactive questions; make reasonable engineering decisions and document them.
 
 ## Local-only Git policy (mandatory)
-- Each benchmark agent operates in its own **local** Git repository at `runs/<agent>/workspace/`, initialized by the orchestrator. Repositories are independent; no GitHub repository is required for an agent run.
+- Each benchmark agent operates in its own **local** Git repository (this workspace), initialized by the orchestrator. Repositories are independent; no GitHub repository is required for an agent run.
 - All commits and history remain on the local machine. **Never run `git push`, `git fetch`, `git pull`, `git clone` to publish or synchronize this workspace, or any Git hosting CLI to upload it.** GitHub/GitLab/etc. are not part of the agent workflow. Dependency retrieval with package managers remains permitted.
 - Do not add, change or configure Git remotes (`git remote add`, `set-url`, etc.). `git remote -v` should produce no entries. If any remote exists, stop Git network operations and document the anomaly in the phase handoff.
 - The orchestrator owns `git init`, baseline and phase commits. **Do not manually commit, amend, rebase, reset, tag or change branches** unless a phase instruction explicitly authorizes it. You may inspect history (`git status`, `git log`, `git diff`, `git show`) to support planning and review.

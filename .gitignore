@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# Run data belongs outside this repository (see runs_root in benchmark.json).
+runs/

@@ -1,6 +1,8 @@
 """End-to-end harness test using a fake CLI; no provider credentials needed."""
 import json
+import os
 import pathlib
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -24,26 +26,30 @@ class Integration(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=pathlib.Path(self.tmp.name)/'bench'
-  import shutil
-  shutil.copytree(core.ROOT,self.root,ignore=shutil.ignore_patterns('runs','__pycache__'))
+  shutil.copytree(core.ROOT,self.root,ignore=shutil.ignore_patterns('runs','__pycache__','.git'))
   fake=self.root/'fakeagent';fake.write_text(FAKE);fake.chmod(0o755)
-  cfg=core.read(self.root/'benchmark.json');cfg['agents']['opencode']['executable']=str(fake)
+  cfg=core.read(self.root/'benchmark.json')
+  cfg['runs_root']=str(pathlib.Path(self.tmp.name)/'runs')
+  cfg['clis']['opencode']['executable']=str(fake)
+  cfg['profiles']={'fake':{'cli':'opencode','model':'fake/model-a'}}
   core.write(self.root/'benchmark.json',cfg)
   self.patcher=patch.object(core,'ROOT',self.root);self.patcher.start();self.addCleanup(self.patcher.stop)
-  self.w=core.init('opencode');self.s=core.initial_state();self.cfg=core.read(self.root/'benchmark.json')
+  self.run_=core.Run('fake');self.w=core.init(self.run_);self.s=core.initial_state()
+ def phase(self):
+  return core.execute_phase(self.run_,self.s,'TASK-001',live=False)
  def test_three_phases_and_local_git(self):
-  for phase in ('plan','implement','review'):
-   self.assertTrue(core.execute_phase('opencode',None,False,self.s,self.w,'TASK-001',self.cfg,live=False))
+  for _ in core.PHASES:
+   self.assertTrue(self.phase())
   self.assertEqual(self.s['tasks']['TASK-001']['status'],'DONE')
   self.assertEqual(len(core.git(self.w,'log','--format=%H').splitlines()),4)
   self.assertEqual(core.git(self.w,'remote'),'')
   self.assertTrue(core.protected_ok(self.w)[0])
+  self.assertEqual(self.s['reported_tokens'],45)
  def test_missing_handoff_recovery_and_block(self):
-  import os
   with patch.dict(os.environ,{'FAKE_MISSING':'1'}):
-   core.execute_phase('opencode',None,False,self.s,self.w,'TASK-001',self.cfg,live=False)
+   self.phase()
    self.assertEqual(self.s['tasks']['TASK-001']['recovery'],1)
-   core.execute_phase('opencode',None,False,self.s,self.w,'TASK-001',self.cfg,live=False)
+   self.phase()
   self.assertEqual(self.s['tasks']['TASK-001']['status'],'BLOCKED')
   self.assertIn('HANDOFF_INVALID',self.s['tasks']['TASK-001']['blocked_reason'])
  def test_generated_handoff_is_not_protected(self):
@@ -51,9 +57,32 @@ class Integration(unittest.TestCase):
   hand.parent.mkdir(exist_ok=True);hand.write_text('notes')
   self.assertTrue(core.protected_ok(self.w)[0])
  def test_repeated_run_archives_handoff(self):
-  core.execute_phase('opencode',None,False,self.s,self.w,'TASK-001',self.cfg,live=False)
+  self.phase()
   self.s['tasks']['TASK-001']['phase']='plan'
-  core.execute_phase('opencode',None,False,self.s,self.w,'TASK-001',self.cfg,live=False)
-  self.assertEqual(len(list((self.root/'runs/opencode/handoff-archive').glob('*.json'))),1)
+  self.phase()
+  self.assertEqual(len(list((self.run_.base/'handoff-archive').glob('*.json'))),1)
+ def test_run_layout_and_metadata(self):
+  self.assertEqual(self.run_.base,pathlib.Path(self.tmp.name)/'runs'/'fake'/'sequential'/'r1')
+  meta=core.read(self.run_.meta)
+  self.assertEqual((meta['profile'],meta['model'],meta['track'],meta['benchmark_version']),('fake','fake/model-a','sequential',1))
+  self.assertIn('cpu_count',meta['host'])
+ def test_separate_runs_do_not_collide(self):
+  other=core.Run('fake',run_id='r2');core.init(other)
+  self.assertNotEqual(other.workspace,self.w);self.assertTrue(other.state.exists())
+ def test_changed_profile_is_rejected(self):
+  core.check_unchanged(self.run_)
+  cfg=core.read(self.root/'benchmark.json');cfg['profiles']['fake']['model']='fake/model-b'
+  core.write(self.root/'benchmark.json',cfg)
+  with self.assertRaises(RuntimeError):
+   core.check_unchanged(core.Run('fake'))
+ def test_runs_root_inside_repo_is_rejected(self):
+  cfg=core.read(self.root/'benchmark.json');cfg['runs_root']=str(self.root/'runs')
+  with self.assertRaises(RuntimeError):
+   core.Run('fake',cfg=cfg)
+ def test_report_names_profile_and_model(self):
+  self.phase();core.write(self.run_.state,self.s)
+  with patch('builtins.print'):
+   r=core.report(self.run_)
+  self.assertEqual((r['profile'],r['model'],r['phases_attempted']),('fake','fake/model-a',1))
 
 if __name__=='__main__':unittest.main()

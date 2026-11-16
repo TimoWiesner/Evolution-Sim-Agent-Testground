@@ -1,26 +1,38 @@
 {
-  "schema_version": 1,
+  "benchmark_version": 1,
+  "runs_root": "~/evo-runs",
   "max_cycles": 3,
   "recovery_attempts": 1,
-  "phase_timeout_seconds": 1800,
   "max_run_seconds": 172800,
   "max_cost_usd": null,
   "max_tokens": null,
   "benchmark_test_timeout_seconds": 180,
   "git_author_name": "Evolution Benchmark",
   "git_author_email": "benchmark@localhost",
-  "agents": {
-    "claude": {
-      "executable": "claude",
-      "extra_args": []
-    },
-    "codex": {
-      "executable": "codex",
-      "extra_args": []
-    },
-    "opencode": {
-      "executable": "opencode",
-      "extra_args": []
+  "clis": {
+    "claude": { "executable": "claude" },
+    "codex": { "executable": "codex" },
+    "opencode": { "executable": "opencode" }
+  },
+  "defaults": {
+    "model": null,
+    "phase_timeout_seconds": 1800,
+    "max_turns": null,
+    "extra_args": [],
+    "env": {}
+  },
+  "profiles": {
+    "claude-opus": { "cli": "claude", "model": "opus" },
+    "claude-sonnet": { "cli": "claude", "model": "sonnet" },
+    "claude-haiku": { "cli": "claude", "model": "haiku" },
+    "gpt-luna": { "cli": "codex", "model": "gpt-6-luna" },
+    "gpt-terra": { "cli": "codex", "model": "gpt-5.6-terra" },
+    "gpt-sol": { "cli": "codex", "model": "gpt-6.1-sol" },
+    "gpt-astra": { "cli": "codex", "model": "gpt-6-astra" },
+    "local-qwen": {
+      "cli": "opencode",
+      "model": "llama.cpp/qwen3.6-35b-a3b",
+      "phase_timeout_seconds": 7200
     }
   }
 }

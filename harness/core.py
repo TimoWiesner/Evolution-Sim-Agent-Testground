@@ -1,10 +1,11 @@
-"""Benchmark v2: subprocess isolated, resumable, streaming, local-only git harness."""
+"""Evolution Agent Benchmark v1: subprocess isolated, resumable, streaming, local-only git harness."""
 import argparse
 import datetime as dt
 import hashlib
 import json
 import os
 import pathlib
+import platform
 import re
 import shutil
 import signal
@@ -13,8 +14,10 @@ import sys
 import time
 from contextlib import contextmanager
 
+BENCHMARK_VERSION = 1
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PHASES = ('plan', 'implement', 'review')
+TRACKS = ('sequential',)
 REQUIRED = ('summary','changed_files','decisions','tests','risks','next_steps','verdict','gaps')
 
 def read(path):
@@ -27,15 +30,93 @@ def write(path, obj):
     tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     os.replace(tmp, p)
 
+def now():
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+def config():
+    return read(ROOT/'benchmark.json')
+
 def specs():
     return {p.parent.name: read(p) for p in sorted((ROOT/'tasks').glob('TASK-*/task.json'))}
 
-def paths(agent):
-    b = ROOT/'runs'/agent
-    return b, b/'workspace', b/'state.json'
+# --- profiles and runs -------------------------------------------------------
+
+def runs_root(cfg):
+    """Run data lives outside the harness tree so agents cannot read operator files."""
+    r = pathlib.Path(cfg['runs_root']).expanduser().resolve()
+    root = ROOT.resolve()
+    if r == root or root in r.parents:
+        raise RuntimeError(f'runs_root must be outside the benchmark repository: {r}')
+    return r
+
+def resolve_profile(cfg, name):
+    """A profile is one CLI + model + settings; defaults are filled in from the config."""
+    if name not in cfg['profiles']:
+        raise RuntimeError(f'Unknown profile {name!r}; available: {", ".join(sorted(cfg["profiles"]))}')
+    p = {**cfg['defaults'], **cfg['profiles'][name]}
+    if p.get('cli') not in cfg['clis']:
+        raise RuntimeError(f'Profile {name!r} names unknown cli {p.get("cli")!r}')
+    p['executable'] = cfg['clis'][p['cli']]['executable']
+    p.setdefault('model', None)
+    return p
+
+def fingerprint(profile):
+    return hashlib.sha256(json.dumps(profile, sort_keys=True).encode()).hexdigest()[:16]
+
+class Run:
+    """One benchmark run: <runs_root>/<profile>/<track>/<run_id>/."""
+    def __init__(self, name, track='sequential', run_id='r1', cfg=None):
+        if track not in TRACKS: raise RuntimeError(f'Unknown track {track!r}')
+        if not re.fullmatch(r'[A-Za-z0-9._-]+', run_id): raise RuntimeError(f'Invalid run id {run_id!r}')
+        self.cfg = cfg or config()
+        self.name, self.track, self.run_id = name, track, run_id
+        self.profile = resolve_profile(self.cfg, name)
+        self.cli = self.profile['cli']
+        self.root = runs_root(self.cfg)
+        self.base = self.root/name/track/run_id
+        self.workspace = self.base/'workspace'
+        self.state = self.base/'state.json'
+        self.meta = self.base/'run.json'
 
 def initial_state():
-    return {'version':2,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
+    return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
+
+def cli_version(executable):
+    tool = shutil.which(executable)
+    if not tool: return None
+    try: return subprocess.run([tool,'--version'],text=True,capture_output=True,timeout=8).stdout.strip()[:180] or None
+    except Exception: return None
+
+def host_info():
+    info = {'platform':platform.platform(),'python':platform.python_version(),'cpu_count':os.cpu_count(),'cpu_model':None,'ram_gb':None}
+    try:
+        for line in pathlib.Path('/proc/cpuinfo').read_text().splitlines():
+            if line.startswith('model name'): info['cpu_model']=line.split(':',1)[1].strip();break
+        for line in pathlib.Path('/proc/meminfo').read_text().splitlines():
+            if line.startswith('MemTotal'): info['ram_gb']=round(int(line.split()[1])/1048576,1);break
+    except (OSError,ValueError,IndexError): pass
+    return info
+
+def harness_commit():
+    try:
+        head = git(ROOT,'rev-parse','HEAD')
+        return head + ('-dirty' if git(ROOT,'status','--porcelain') else '')
+    except Exception: return None
+
+def run_metadata(run):
+    return {'benchmark_version':BENCHMARK_VERSION,'profile':run.name,'track':run.track,'run_id':run.run_id,
+            'cli':run.cli,'model':run.profile['model'],'settings':run.profile,'fingerprint':fingerprint(run.profile),
+            'cli_version':cli_version(run.profile['executable']),'harness_commit':harness_commit(),
+            'host':host_info(),'created':now()}
+
+def check_unchanged(run):
+    """A run is only comparable if every phase used the same model and settings."""
+    stored = read(run.meta)
+    if stored['fingerprint'] != fingerprint(run.profile):
+        raise RuntimeError(f'Profile {run.name!r} changed since this run started '
+                           f'(was {stored["settings"]}). Start a new run with --run-id.')
+
+# --- workspace integrity -----------------------------------------------------
 
 def sha(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
@@ -70,63 +151,72 @@ def ensure_local_git(w):
     remotes = git(w,'remote')
     if remotes: raise RuntimeError(f'Remotes forbidden in workspace: {remotes}')
 
-def init(agent):
-    b,w,s = paths(agent)
-    if s.exists(): return w
-    if b.exists(): raise RuntimeError(f'Incomplete run directory: {b} (do not overwrite)')
-    b.mkdir(parents=True)
+def init(run):
+    w = run.workspace
+    if run.state.exists(): return w
+    if run.base.exists(): raise RuntimeError(f'Incomplete run directory: {run.base} (do not overwrite)')
+    run.base.mkdir(parents=True)
     shutil.copytree(ROOT/'starter',w)
     shutil.copytree(ROOT/'tasks',w/'tasks')
     shutil.copytree(ROOT/'skills',w/'.agents'/'skills')
     git(w,'init','-q')
-    git(w,'config','user.name','Evolution Benchmark')
-    git(w,'config','user.email','benchmark@localhost')
+    git(w,'config','user.name',run.cfg['git_author_name'])
+    git(w,'config','user.email',run.cfg['git_author_email'])
     git(w,'add','-A')
     git(w,'commit','-qm','benchmark baseline')
-    write(s,initial_state())
+    write(run.meta,run_metadata(run))
+    write(run.state,initial_state())
     return w
 
 def ready(state):
     sp = specs()
     return [k for k,t in state['tasks'].items() if t['status'] in ('PENDING','ACTIVE') and all(state['tasks'][d]['status']=='DONE' for d in sp[k]['dependencies'])]
 
-def adapter(agent, model=None, unsafe=False, workspace=None):
-    c=read(ROOT/'benchmark.json')['agents'][agent]
-    base=[c['executable']]
-    if agent == 'claude':
-        base+=['-p','--output-format','stream-json','--verbose','--max-turns','80']
+# --- CLI adapters ------------------------------------------------------------
+
+def adapter(profile, unsafe=False):
+    cli=profile['cli'];model=profile.get('model');base=[profile['executable']]
+    if cli == 'claude':
+        base+=['-p','--output-format','stream-json','--verbose']
+        if profile.get('max_turns'): base+=['--max-turns',str(profile['max_turns'])]
         if unsafe: base.append('--dangerously-skip-permissions')
         if model: base+=['--model',model]
-    elif agent == 'codex':
+    elif cli == 'codex':
         base+=['exec','--json','--ephemeral']
         base += ['--dangerously-bypass-approvals-and-sandbox'] if unsafe else ['--sandbox','workspace-write']
         if model: base+=['--model',model]
-    elif agent == 'opencode':
+    elif cli == 'opencode':
+        # The workspace is selected through the subprocess working directory.
         base+=['run','--standalone','--format','json']
-        if workspace is not None: base+=['--dir',str(pathlib.Path(workspace).resolve())]
         if unsafe: base.append('--auto')
         if model: base+=['--model',model]
-    return base + c.get('extra_args',[])
+    else:
+        raise RuntimeError(f'No adapter for cli {cli!r}')
+    return base + list(profile.get('extra_args') or [])
 
-def usage(agent, out):
-    tok=cost=None
+def usage(cli, out):
+    """Sum the usage a CLI reports over one process. None means 'not reported', never zero."""
+    tok=cost=model=None
     for line in out.splitlines():
         try:o=json.loads(line)
         except (ValueError,TypeError):continue
         if not isinstance(o,dict):continue
-        if agent=='claude' and o.get('type')=='result':
-            c=o.get('total_cost_usd')
-            if isinstance(c,(int,float)): cost=float(c)
-            u=o.get('usage') or {}
-            if isinstance(u,dict):
-                v=sum(u.get(k,0) or 0 for k in ('input_tokens','output_tokens','cache_creation_input_tokens','cache_read_input_tokens'))
-                if v:tok=int(v)
-        elif agent=='codex' and o.get('type')=='turn.completed':
+        if cli=='claude':
+            if o.get('type')=='system' and o.get('subtype')=='init' and isinstance(o.get('model'),str):
+                model=o['model']
+            if o.get('type')=='result':
+                c=o.get('total_cost_usd')
+                if isinstance(c,(int,float)): cost=(cost or 0)+float(c)
+                u=o.get('usage') or {}
+                if isinstance(u,dict):
+                    v=sum(u.get(k,0) or 0 for k in ('input_tokens','output_tokens','cache_creation_input_tokens','cache_read_input_tokens'))
+                    if v:tok=(tok or 0)+int(v)
+        elif cli=='codex' and o.get('type')=='turn.completed':
             u=o.get('usage') or {}
             if isinstance(u,dict):
                 v=(u.get('input_tokens') or 0)+(u.get('output_tokens') or 0)
-                if v:tok=int(v)
-        elif agent=='opencode':
+                if v:tok=(tok or 0)+int(v)
+        elif cli=='opencode':
             part=o.get('part') or {}
             if isinstance(part,dict):
                 c=part.get('cost')
@@ -135,13 +225,13 @@ def usage(agent, out):
                 if isinstance(t,dict):
                     v=(t.get('input') or 0)+(t.get('output') or 0)+(t.get('reasoning') or 0)
                     if v:tok=(tok or 0)+v
-    return {'tokens':tok,'cost_usd':cost}
+    return {'tokens':tok,'cost_usd':cost,'reported_model':model}
 
-def short_event(agent, line):
+def short_event(cli, line):
     try:o=json.loads(line)
     except ValueError:return None
     if not isinstance(o,dict):return None
-    if agent=='claude':
+    if cli=='claude':
         typ=o.get('type')
         if typ=='assistant':
             blocks=(o.get('message') or {}).get('content') or []
@@ -155,7 +245,7 @@ def short_event(agent, line):
                 b=e.get('content_block') or {}
                 if b.get('type')=='tool_use':return 'tool: '+str(b.get('name'))[:70]
         return None
-    if agent=='codex':
+    if cli=='codex':
         t=o.get('type','');item=o.get('item') or {};kind=item.get('type','')
         if t=='item.started' and kind=='command_execution':return 'command started: '+str(item.get('command',''))[:100]
         if t=='item.completed' and kind in ('file_change','plan_update','agent_message'):return kind.replace('_',' ')+' completed'
@@ -170,11 +260,11 @@ def short_event(agent, line):
     if t=='error':return 'agent error'
     return None
 
-def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False):
+def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=None):
     start=time.monotonic();out=[];timed_out=False
     if logfile:
         logfile=pathlib.Path(logfile);logfile.parent.mkdir(parents=True,exist_ok=True)
-    proc=subprocess.Popen(argv,cwd=str(cwd),stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,start_new_session=True)
+    proc=subprocess.Popen(argv,cwd=str(cwd),stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,start_new_session=True,env={**os.environ,**env} if env else None)
     if stdin is not None:
         proc.stdin.write(stdin);proc.stdin.close()
     # Reader thread avoids blocking on incomplete output while enforcing timeout.
@@ -211,6 +301,8 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False):
         proc.stdout.close()
     return {'exit_code':124 if timed_out else proc.returncode,'seconds':round(time.monotonic()-start,2),'output':''.join(out),'timeout':timed_out}
 
+# --- phases ------------------------------------------------------------------
+
 def handoff_valid(path,task,phase,cycle):
     if not pathlib.Path(path).is_file():return False,f'missing handoff: {path}'
     try:
@@ -234,7 +326,7 @@ def prompt_for(task,phase,cycle,w=None):
     w=pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
-            f'IMPORTANT: This is the ONLY code project root; do NOT access benchmark root docs/tasks. '
+            f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. '
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
             f'Task {task}, phase {phase.upper()}, cycle {cycle}. '
@@ -262,12 +354,14 @@ def error_class(r,ok,reason,integrity,check):
     if check['exit_code']!=0:return 'ACCEPTANCE_FAILURE'
     return None
 
-def execute_phase(agent,model,unsafe,state,w,task,cfg,dry=False,live=True):
-    ts=state['tasks'][task];phase=ts['phase'];cycle=ts['cycle'];b,_,_=paths(agent)
+def execute_phase(run,state,task,unsafe=False,dry=False,live=True):
+    cfg=run.cfg;w=run.workspace;b=run.base;profile=run.profile
+    ts=state['tasks'][task];phase=ts['phase'];cycle=ts['cycle']
     label=f'{task}-{phase}-{cycle}-attempt{ts["recovery"]}'
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
+    argv=adapter(profile,unsafe)
     if dry:
-        print('DRY RUN',label,' '.join(adapter(agent,model,unsafe,w)));return False
+        print('DRY RUN',label,' '.join(argv));return False
     ensure_local_git(w)
     ok,reason=protected_ok(w)
     if not ok:raise RuntimeError('Workspace already changed protected file before phase: '+reason)
@@ -277,16 +371,16 @@ def execute_phase(agent,model,unsafe,state,w,task,cfg,dry=False,live=True):
         archive.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(hand,archive)
         hand.unlink()
     # checkpoint before any agent process, survives power loss
-    write(b/'inflight.json',{'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'started':dt.datetime.now(dt.timezone.utc).isoformat()})
+    write(b/'inflight.json',{'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'started':now()})
     print(f'START {label} (cwd={w})',flush=True)
-    r=cmd(adapter(agent,model,unsafe,w)+[prompt_for(task,phase,cycle,w)],w,cfg['phase_timeout_seconds'],logfile=b/'logs'/f'{label}.jsonl',agent=agent,live=live)
+    r=cmd(argv+[prompt_for(task,phase,cycle,w)],w,profile['phase_timeout_seconds'],logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=profile.get('env'))
     hand_ok,reason=handoff_valid(hand,task,phase,cycle)
     intact,integrity_error=protected_ok(w)
     if not intact:reason='Protected benchmark spec modified: '+integrity_error
     chk=external_checks(w,task,phase,cfg['benchmark_test_timeout_seconds']) if hand_ok and intact and r['exit_code']==0 else {'exit_code':1,'output':'not run'}
     failure=error_class(r,hand_ok,reason,intact,chk)
-    u=usage(agent,r['output']);record_usage(state,u);state['spent_seconds']+=r['seconds']
-    ev={'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':chk['exit_code'],'external_check_tail':chk['output'][-1200:],'usage':u,'passed':failure is None,'failure_class':failure,'timestamp':dt.datetime.now(dt.timezone.utc).isoformat()}
+    u=usage(run.cli,r['output']);record_usage(state,u);state['spent_seconds']+=r['seconds']
+    ev={'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':chk['exit_code'],'external_check_tail':chk['output'][-1200:],'usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
     ts['history'].append(ev);state['events'].append(ev)
     # Always capture agent edits in local git, even for failure; crucial for recovery diagnosis.
     ensure_local_git(w)
@@ -317,85 +411,93 @@ def execute_phase(agent,model,unsafe,state,w,task,cfg,dry=False,live=True):
         print('FINISHED',label, '=>',ts['status'],ts['phase'],flush=True)
     return True
 
-def choose_ready(agent,model,unsafe,state,w,timeout,dry=False,live=True):
+def choose_ready(state):
+    """Deterministic order: finish started tasks first, then the lowest ready task ID.
+
+    The harness decides, not the model, so every profile works through the same sequence."""
     ids=ready(state)
     active=sorted(k for k in ids if state['tasks'][k]['status']=='ACTIVE')
     if active:return active[0]
     pending=sorted(k for k in ids if state['tasks'][k]['status']=='PENDING')
-    if not pending:return None
-    if len(pending)==1 or dry:return pending[0]
-    prompt=f'WORKSPACE ROOT: {w.resolve()}. Select one available task ID among {pending} based on dependencies. Output only TASK-NNN.'
-    b,_,_=paths(agent)
-    r=cmd(adapter(agent,model,unsafe,w)+[prompt],w,min(timeout,120),logfile=b/'logs'/f'choose-{int(time.time())}.jsonl',agent=agent,live=live)
-    valid=[m for m in re.findall(r'TASK-\d{3}',r['output']) if m in pending]
-    return valid[-1] if r['exit_code']==0 and valid else pending[0]
+    return pending[0] if pending else None
 
-def report(agent):
-    b,w,s=paths(agent);st=read(s);tasks=st['tasks'];counts={x:sum(v['status']==x for v in tasks.values()) for x in ('PENDING','ACTIVE','DONE','BLOCKED')}
+def report(run):
+    st=read(run.state);meta=read(run.meta);tasks=st['tasks']
+    counts={x:sum(v['status']==x for v in tasks.values()) for x in ('PENDING','ACTIVE','DONE','BLOCKED')}
     events=st['events'];classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
-    result={'agent':agent,'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),'phases_attempted':len(events),'failure_classes':classes,'reported_total_tokens':st['reported_tokens'] if st['tokens_complete'] else None,'reported_total_cost_usd':round(st['reported_cost_usd'],4) if st['cost_complete'] else None,'wall_seconds_agent_calls':round(st['spent_seconds'],2),'unreported_usage_warning':not(st['tokens_complete'] and st['cost_complete']),'tasks':tasks}
-    manual=b/'manual-review.json'
+    reported=sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')})
+    result={'benchmark_version':meta['benchmark_version'],'profile':run.name,'track':run.track,'run_id':run.run_id,'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],'reported_models':reported,'harness_commit':meta['harness_commit'],'host':meta['host'],
+            'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),'phases_attempted':len(events),'failure_classes':classes,'reported_total_tokens':st['reported_tokens'] if st['tokens_complete'] else None,'reported_total_cost_usd':round(st['reported_cost_usd'],4) if st['cost_complete'] else None,'wall_seconds_agent_calls':round(st['spent_seconds'],2),'unreported_usage_warning':not(st['tokens_complete'] and st['cost_complete']),'tasks':tasks}
+    manual=run.base/'manual-review.json'
     if manual.exists():result['manual_review']=read(manual)
-    write(b/'report.json',result)
-    print(json.dumps({k:v for k,v in result.items() if k!='tasks'},indent=2))
+    write(run.base/'report.json',result)
+    print(json.dumps({k:v for k,v in result.items() if k not in ('tasks','host')},indent=2))
     return result
 
 @contextmanager
-def lock_run(agent):
+def lock_run(run):
     import fcntl
-    b,_,_=paths(agent)
-    lock_dir=ROOT/'runs'/'.locks';lock_dir.mkdir(parents=True,exist_ok=True)
-    with open(lock_dir/(agent+'.lock'),'w') as f:
+    lock_dir=run.root/'.locks';lock_dir.mkdir(parents=True,exist_ok=True)
+    with open(lock_dir/f'{run.name}--{run.track}--{run.run_id}.lock','w') as f:
         try:fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:raise RuntimeError(f'Another run for {agent} is already active')
+        except BlockingIOError:raise RuntimeError(f'Another process is already working on {run.base}')
         yield
 
+def doctor(cfg):
+    print('Benchmark version',BENCHMARK_VERSION);print('Python',sys.version.split()[0]);print('git:',shutil.which('git'))
+    print('runs root:',runs_root(cfg))
+    for name,v in cfg['clis'].items():
+        print(f'cli {name}:',shutil.which(v['executable']) or 'NOT FOUND',' ',cli_version(v['executable']) or '')
+    print('profiles:')
+    for name in sorted(cfg['profiles']):
+        p=resolve_profile(cfg,name)
+        print(f'  {name}: cli={p["cli"]} model={p["model"] or "(CLI default)"} phase_timeout={p["phase_timeout_seconds"]}s')
+
 def main():
-    p=argparse.ArgumentParser(description='Evolution Benchmark v2')
+    cfg=config()
+    p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
     for name in ('doctor','init','run','report','unblock'):
         q=sub.add_parser(name)
-        if name!='doctor':q.add_argument('--agent',choices=('claude','codex','opencode'),required=True)
+        if name!='doctor':
+            q.add_argument('--profile',choices=sorted(cfg['profiles']),required=True,help='named CLI + model combination from benchmark.json')
+            q.add_argument('--track',choices=TRACKS,default='sequential')
+            q.add_argument('--run-id',default='r1',help='distinguishes repeated runs of the same profile and track')
         if name=='run':
-            q.add_argument('--model');q.add_argument('--allow-unsafe',action='store_true');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
+            q.add_argument('--allow-unsafe',action='store_true');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
         if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES);q.add_argument('--cycle',type=int)
-    a=p.parse_args();cfg=read(ROOT/'benchmark.json')
-    if a.action=='doctor':
-        print('Python',sys.version.split()[0]);print('git:',shutil.which('git'))
-        for name,v in cfg['agents'].items():
-            tool=shutil.which(v['executable']);print(name,tool or 'NOT FOUND')
-            if tool:
-                try:print(' ',subprocess.run([tool,'--version'],text=True,capture_output=True,timeout=8).stdout.strip()[:180])
-                except Exception as e:print(' version unavailable',e)
-        return
-    if a.action=='init':print('Workspace:',init(a.agent));return
-    if a.action=='report':report(a.agent);return
+    a=p.parse_args()
+    if a.action=='doctor':doctor(cfg);return
+    run=Run(a.profile,a.track,a.run_id,cfg)
+    if a.action=='init':print('Workspace:',init(run));return
+    if a.action=='report':report(run);return
     if a.action=='unblock':
-        b,w,s=paths(a.agent);st=read(s);ts=st['tasks'][a.task]
+        st=read(run.state);ts=st['tasks'][a.task]
         if ts['status']!='BLOCKED':raise RuntimeError('Task is not BLOCKED')
         ts['status']='ACTIVE';ts['recovery']=0;ts.pop('blocked_reason',None)
         if a.phase:ts['phase']=a.phase
         if a.cycle:ts['cycle']=a.cycle
-        write(s,st);print('Unblocked',a.task,ts['phase'],ts['cycle']);return
-    with lock_run(a.agent):
-        b,w,s=paths(a.agent)
-        if not s.exists():init(a.agent)
-        if not a.dry_run and not shutil.which(cfg['agents'][a.agent]['executable']):p.error('CLI missing')
+        write(run.state,st);print('Unblocked',a.task,ts['phase'],ts['cycle']);return
+    with lock_run(run):
+        b=run.base;w=run.workspace
+        if not run.state.exists():init(run)
+        check_unchanged(run)
+        if not a.dry_run and not shutil.which(run.profile['executable']):p.error('CLI missing')
         ensure_local_git(w)
         if (b/'inflight.json').exists():
             print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
             (b/'inflight.json').unlink()
-        st=read(s);n=0
+        st=read(run.state);n=0
         while True:
             if a.max_phases is not None and n>=a.max_phases:break
             if st['spent_seconds']>=cfg['max_run_seconds']:print('time budget exceeded');break
             if cfg['max_cost_usd'] is not None and (not st['cost_complete'] or st['reported_cost_usd']>=cfg['max_cost_usd']):print('cost budget reached/unknown');break
             if cfg['max_tokens'] is not None and (not st['tokens_complete'] or st['reported_tokens']>=cfg['max_tokens']):print('token budget reached/unknown');break
-            task=choose_ready(a.agent,a.model,a.allow_unsafe,st,w,cfg['phase_timeout_seconds'],a.dry_run,not a.quiet)
+            task=choose_ready(st)
             if not task:break
-            done=execute_phase(a.agent,a.model,a.allow_unsafe,st,w,task,cfg,a.dry_run,not a.quiet)
+            done=execute_phase(run,st,task,a.allow_unsafe,a.dry_run,not a.quiet)
             if not done:break
-            write(s,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
-        report(a.agent)
+            write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
+        report(run)
 
 if __name__=='__main__':main()
