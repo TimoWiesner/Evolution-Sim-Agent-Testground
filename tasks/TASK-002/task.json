@@ -8,7 +8,10 @@
   "acceptance_criteria": [
     "Clean install/build documented",
     "CLI help works",
-    "tests run in CI-like command."
+    "tests run in CI-like command.",
+    "`./setup.sh`, `./evosim` and `./build.sh` exist as defined in `docs/CONTRACT.md` section 1",
+    "`./evosim version` prints the contract JSON after `./setup.sh` in a fresh container",
+    "`./build.sh` produces `dist/evosim` and `dist/evosim version` works"
   ],
   "phases": [
     "plan",

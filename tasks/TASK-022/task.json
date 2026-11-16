@@ -10,7 +10,8 @@
   "objective": "Serialize complete organisms, genome, world, clock, RNG and climate for restoration.",
   "acceptance_criteria": [
     "Uninterrupted vs checkpoint-resume statistical consistency",
-    "versioning & invalid-file behavior."
+    "versioning & invalid-file behavior.",
+    "`./evosim run --save/--load` follow `docs/CONTRACT.md`: a resumed run reproduces the `state_hash`, `final` and `totals` of an uninterrupted run"
   ],
   "phases": [
     "plan",

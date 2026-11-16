@@ -8,7 +8,9 @@
   "acceptance_criteria": [
     "Malformed configs rejected",
     "JSON/TOML/YAML roundtrip",
-    "preset fixtures."
+    "preset fixtures.",
+    "the fixed configuration keys of `docs/CONTRACT.md` section 3 are accepted from JSON, and a file with only those keys is valid",
+    "zero initial populations are accepted"
   ],
   "phases": [
     "plan",

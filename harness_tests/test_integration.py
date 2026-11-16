@@ -45,6 +45,11 @@ class Integration(unittest.TestCase):
   self.assertEqual(core.git(self.w,'remote'),'')
   self.assertTrue(core.protected_ok(self.w)[0])
   self.assertEqual(self.s['reported_tokens'],45)
+ def test_changed_contract_is_restored(self):
+  c=self.w/'docs/CONTRACT.md';original=c.read_text();c.write_text('weakened')
+  self.assertFalse(core.protected_ok(self.w)[0])
+  self.s['tasks']['TASK-001']['phase']='plan'
+  with self.assertRaises(RuntimeError):self.phase()
  def test_missing_handoff_recovery_and_block(self):
   with patch.dict(os.environ,{'FAKE_MISSING':'1'}):
    self.phase()

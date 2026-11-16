@@ -8,6 +8,8 @@ Property tests, 10k+-tick scenarios, regression suite, docs, runnable end-to-end
 
 ## Acceptance criteria
 - Run logs, checked edge cases, UI+headless instructions, outstanding limitations clearly listed.
+- every command and required behaviour in `docs/CONTRACT.md` is verified and the evidence recorded
+- `./build.sh` output is self-contained as required by `docs/CONTRACT.md` section 6
 
 ## Workflow
 Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.

@@ -10,7 +10,9 @@
   ],
   "objective": "Property tests, 10k+-tick scenarios, regression suite, docs, runnable end-to-end demo and final self-audit.",
   "acceptance_criteria": [
-    "Run logs, checked edge cases, UI+headless instructions, outstanding limitations clearly listed."
+    "Run logs, checked edge cases, UI+headless instructions, outstanding limitations clearly listed.",
+    "every command and required behaviour in `docs/CONTRACT.md` is verified and the evidence recorded",
+    "`./build.sh` output is self-contained as required by `docs/CONTRACT.md` section 6"
   ],
   "phases": [
     "plan",

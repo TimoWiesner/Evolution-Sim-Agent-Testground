@@ -92,12 +92,23 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 
 - `tasks/TASK-*/task.md` and `task.json`: task specifications.
 - `skills/{plan,implement,review}/SKILL.md`: phase instructions copied into each workspace.
-- `starter/`: initial project files, `AGENTS.md` and `CLAUDE.md`.
+- `starter/`: initial project files, `AGENTS.md`, `CLAUDE.md` and the interface contract `docs/CONTRACT.md`.
 - `harness/core.py`: runner and CLI adapters.
 - `harness_tests/`: unit tests and an end-to-end test with a fake agent.
 - `acceptance/`: operator-owned baseline checks.
 - `container/Containerfile`: the agent sandbox image (Ubuntu 24.04, Python, Rust, Node, build tools).
 - `docs/`: [method](docs/BENCHMARK.md), [engineering notes](docs/HARNESS.md), [security](docs/SECURITY.md).
+
+## Interface contract
+
+Agents choose language, architecture and UI themselves, but every product must expose the same outside, defined in [`starter/docs/CONTRACT.md`](starter/docs/CONTRACT.md):
+
+- `./setup.sh` installs everything in a fresh container, `./evosim` runs the product, `./build.sh` produces a self-contained `dist/evosim`.
+- `evosim run` takes a fixed set of flags and a few fixed configuration keys and writes a fixed result JSON (populations, species, births and deaths, a state hash, speed).
+- Runs must be deterministic per seed, a checkpoint resume must reproduce an uninterrupted run exactly, and extinct kinds must stay extinct.
+- `evosim ui --smoke-test` must start the real UI and exit cleanly.
+
+This makes products from different models testable with one black-box suite and packageable with one build step. Seven of the 27 tasks carry the matching acceptance criteria.
 
 ## What is and is not measured today
 
@@ -119,4 +130,4 @@ Each run has its own container. The agent is root inside it and may install anyt
 
 The agent does get a copy of the CLI login, and a container is not a VM. [docs/SECURITY.md](docs/SECURITY.md) lists what is and is not protected.
 
-Task specifications, skills and root agent instructions are checked against the originals after every phase and restored if changed.
+Task specifications, skills, the interface contract and root agent instructions are checked against the originals after every phase and restored if changed.

@@ -29,6 +29,7 @@ LOGIN_FILES = {
     'opencode': ('.config/opencode/opencode.jsonc','.config/opencode/opencode.json','.local/share/opencode/auth.json'),
 }
 LOGIN_REQUIRED = ('claude','codex')
+PROTECTED_STARTER = ('AGENTS.md','CLAUDE.md','docs/CONTRACT.md')
 REQUIRED = ('summary','changed_files','decisions','tests','risks','next_steps','verdict','gaps')
 
 def read(path):
@@ -226,7 +227,7 @@ def protected_manifest():
         for p in (ROOT/folder).glob('**/*'):
             if p.is_file() and (folder == 'skills' or p.name in ('task.md','task.json')):
                 result[f'{folder}/{p.relative_to(ROOT/folder)}'] = sha(p)
-    for name in ('AGENTS.md','CLAUDE.md'):
+    for name in PROTECTED_STARTER:
         result[name] = sha(ROOT/'starter'/name)
     return result
 
@@ -450,7 +451,7 @@ def prompt_for(task,phase,cycle,w=None,sandbox=False):
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
             f'Task {task}, phase {phase.upper()}, cycle {cycle}. '
-            f'Read AGENTS.md, docs/PROJECT.md, docs/STATE.md, docs/ARCHITECTURE.md, '
+            f'Read AGENTS.md, docs/PROJECT.md, docs/CONTRACT.md, docs/STATE.md, docs/ARCHITECTURE.md, '
             f'tasks/{task}/task.md, tasks/{task}/task.json, existing task handoffs, dependent task handoffs, '
             f'and .agents/skills/{phase}/SKILL.md. Follow that skill. '
             f'Before returning, write a VALID UTF-8 JSON handoff to this ABSOLUTE file path: {hand}. '

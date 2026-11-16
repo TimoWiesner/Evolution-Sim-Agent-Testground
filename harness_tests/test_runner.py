@@ -62,4 +62,13 @@ class RunnerTests(unittest.TestCase):
   run=core.Run('gpt-luna',cfg=cfg)
   argv=core.phase_argv(run,'TASK-001','plan',1)
   self.assertEqual(argv[0],'codex');self.assertIn('workspace-write',argv)
+ def test_contract_is_protected_and_referenced(self):
+  from harness import core
+  self.assertIn('docs/CONTRACT.md',core.protected_manifest())
+  self.assertIn('docs/CONTRACT.md',core.prompt_for('TASK-001','plan',1,'/tmp'))
+  sp=specs()
+  for t in ('TASK-002','TASK-003','TASK-019','TASK-021','TASK-022','TASK-023','TASK-027'):
+   self.assertTrue(any('docs/CONTRACT.md' in c for c in sp[t]['acceptance_criteria']),t)
+   md=(core.ROOT/'tasks'/t/'task.md').read_text()
+   for c in sp[t]['acceptance_criteria']:self.assertIn(c,md)
 if __name__=='__main__':unittest.main()

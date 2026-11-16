@@ -8,7 +8,8 @@
   ],
   "objective": "Agent-choice desktop/web UI showing climate cells and differentiated organisms with pan and zoom.",
   "acceptance_criteria": [
-    "Launch instructions, inspectable viewport, 1k entities usable."
+    "Launch instructions, inspectable viewport, 1k entities usable.",
+    "`./evosim ui --smoke-test` passes as defined in `docs/CONTRACT.md` section 2 on a virtual display"
   ],
   "phases": [
     "plan",

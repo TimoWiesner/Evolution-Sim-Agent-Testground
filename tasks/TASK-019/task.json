@@ -9,7 +9,8 @@
   "acceptance_criteria": [
     "No display requirements",
     "documented CLI invocation",
-    "deterministic result schema."
+    "deterministic result schema.",
+    "`./evosim run` implements the flags, result JSON, determinism and error behaviour of `docs/CONTRACT.md` sections 2, 4 and 5 (checkpoint flags excepted)"
   ],
   "phases": [
     "plan",

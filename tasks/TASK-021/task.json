@@ -7,7 +7,8 @@
   ],
   "objective": "Sweep parameters and seeds; JSON/CSV aggregation and comparison.",
   "acceptance_criteria": [
-    "At least 2x2 matrix fixture, per-run metadata and reproducible aggregate."
+    "At least 2x2 matrix fixture, per-run metadata and reproducible aggregate.",
+    "`./evosim batch` writes per-seed results and a summary as defined in `docs/CONTRACT.md` section 2"
   ],
   "phases": [
     "plan",
