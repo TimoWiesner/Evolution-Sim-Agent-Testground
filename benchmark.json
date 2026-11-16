@@ -40,6 +40,7 @@
     "host_ports": [], "workers": 3
   },
   "profiles": {
+    "claude-fable": { "cli": "claude", "model": "fable" },
     "claude-opus": { "cli": "claude", "model": "opus" },
     "claude-sonnet": { "cli": "claude", "model": "sonnet" },
     "claude-haiku": { "cli": "claude", "model": "haiku" },
