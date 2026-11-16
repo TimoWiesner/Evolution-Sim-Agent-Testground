@@ -93,7 +93,7 @@ class Run:
         self.home = self.base/'home'   # container $HOME; holds copied logins, never publish it
 
 def initial_state():
-    return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'interventions':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
+    return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'interventions':[],'evaluations':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
 
 def cli_version(executable):
     tool = shutil.which(executable)
@@ -576,6 +576,8 @@ def summarize(meta,state):
             'first_cycle_pass_ratio':round(sum(t['cycle']==1 for t in done)/len(done),4) if done else None,
             'phases_attempted':len(events),'phases_failed':sum(1 for e in events if e.get('failure_class')),'failure_classes':classes,
             'operator_interventions':len(state.get('interventions',[])),
+            'evaluation':next((e for e in reversed(state.get('evaluations',[])) if 'error' not in e),None),
+            'evaluations_failed':sum('error' in e for e in state.get('evaluations',[])),
             'reported_total_tokens':total(events,'tokens'),**{'reported_'+k:total(events,k) for k in TOKEN_KINDS},
             'reported_total_cost_usd':None if cost is None else round(cost,4),
             'wall_seconds_agent_calls':round(state['spent_seconds'],2),
@@ -588,6 +590,70 @@ def report(run):
     write(run.base/'report.json',result)
     print(json.dumps({k:v for k,v in result.items() if k not in ('tasks','host')},indent=2))
     return result
+
+# --- hidden evaluation -------------------------------------------------------
+
+EVAL_PREP=('cd /workspace; for s in setup build; do '
+           'if [ -x ./$s.sh ]; then timeout -k 10 1800 ./$s.sh >/out/$s.log 2>&1; echo $? >/out/$s.exit; '
+           'else echo 127 >/out/$s.exit; fi; done')
+
+def eval_dir(cfg):
+    """The private evaluation repository, or None when it is not available on this machine."""
+    path=(cfg.get('eval') or {}).get('path')
+    if not path:return None
+    p=pathlib.Path(path).expanduser()
+    p=(p if p.is_absolute() else ROOT/p).resolve()
+    return p if (p/'evaluate.py').is_file() else None
+
+def repo_commit(path):
+    try:return git(path,'rev-parse','HEAD')+('-dirty' if git(path,'status','--porcelain') else '')
+    except Exception:return None
+
+def evaluation_commands(cfg,name,image,product,out,ed,done):
+    """Two containers: (1) setup and build with network but without the tests;
+    (2) the tests, mounted read-only, with no network, so product code can never leak them."""
+    rt=runtime(cfg);t=cfg['eval']['timeout_seconds'];mounts=['-v',f'{product}:{CONTAINER_WS}','-v',f'{out}:/out']
+    prep=[rt,'run','--name',name,'--network','pasta:--map-guest-addr,none',*mounts,cfg['container']['image'],'bash','-c',EVAL_PREP]
+    test=[rt,'run','--rm','--name',name,'--network','none',*mounts,'-v',f'{ed}:/eval:ro',image,
+          'timeout','-k','10',str(t),'python3','/eval/evaluate.py','--product',CONTAINER_WS,'--out','/out/result.json',
+          '--done',','.join(sorted(done)),'--prep','/out']
+    return prep,test
+
+def evaluate_run(run,state,label,commit='HEAD'):
+    """Score a committed workspace state with the hidden suite. The result is stored with the run
+    and never shown to the agent. Returns the record, or None when no evaluation repository exists."""
+    cfg=run.cfg;ed=eval_dir(cfg)
+    if not ed:return None
+    rt=runtime(cfg);t=cfg['eval']['timeout_seconds'];start=time.monotonic()
+    done=[k for k,v in state['tasks'].items() if v['status']=='DONE']
+    work=run.base/'eval'/label;shutil.rmtree(work,ignore_errors=True)
+    product=work/'product';out=work/'out';product.mkdir(parents=True);out.mkdir()
+    name='evo-eval-'+container_name(run)[4:]+'-'+label.lower();image=name+'-img'
+    record={'label':label,'commit':git(run.workspace,'rev-parse',commit),'eval_commit':repo_commit(ed),'done_tasks':len(done),'timestamp':now()}
+    print(f'EVALUATE {label} (hidden suite, result not shown to the agent)',flush=True)
+    try:
+        tar=subprocess.run(['git','archive','--format=tar',commit],cwd=run.workspace,capture_output=True,check=True).stdout
+        subprocess.run(['tar','-x','-C',str(product)],input=tar,check=True)
+        prep,test=evaluation_commands(cfg,name,image,product,out,ed,done)
+        subprocess.run([rt,'rm','-f',name],capture_output=True)
+        cmd(prep,work,t,logfile=work/'prep.log')
+        subprocess.run([rt,'stop','-t','0',name],capture_output=True)
+        subprocess.run([rt,'commit','-q',name,image],check=True,capture_output=True)
+        subprocess.run([rt,'rm','-f',name],capture_output=True)
+        cmd(test,work,t+60,logfile=work/'eval.log')
+        result=read(out/'result.json')
+        write(run.base/'eval'/f'{label}.json',{**record,**result})
+        record.update({k:result[k] for k in ('eval_version','passed','due','total','categories','metrics')})
+    except Exception as e:
+        record['error']=f'{type(e).__name__}: {e}'[:400]
+    finally:
+        subprocess.run([rt,'rm','-f',name],capture_output=True)
+        subprocess.run([rt,'rmi','-f',image],capture_output=True)
+        shutil.rmtree(product,ignore_errors=True)
+    record['seconds']=round(time.monotonic()-start,1)
+    state['evaluations']=[e for e in state.get('evaluations',[]) if e['label']!=label]+[record]
+    print(f'EVALUATED {label}: '+(record.get('error') or f'{record["passed"]}/{record["due"]} due checks passed'),flush=True)
+    return record
 
 # --- comparison --------------------------------------------------------------
 
@@ -634,6 +700,15 @@ def comparison_markdown(rows):
           fmt_count(median([r['reported_input_tokens'] for r in g])),fmt_count(median([r['reported_cached_input_tokens'] for r in g])),
           fmt_count(median([r['reported_output_tokens'] for r in g])),fmt_cost(median([r['reported_total_cost_usd'] for r in g]))]
          for (track,profile),g in sorted(groups.items())]))
+    scored=[r for r in rows if r['evaluation']]
+    if scored:
+        cats=list(scored[0]['evaluation']['categories'])
+        out+=['','## Hidden test results','','Checks passed out of all checks in the suite, from the latest evaluation of each run. '
+              'Checks belonging to tasks that are not done yet count as not passed. Speed is measured by the suite at about 2,000 individuals.','']
+        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[c.capitalize() for c in cats]+['Ticks/s'],
+            [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
+             +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
+             +[r['evaluation']['metrics'].get('ticks_per_second','—')] for r in scored]))
     out+=['','## Every run','']
     out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
         [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",r['status_counts']['BLOCKED'],
@@ -646,6 +721,8 @@ def comparison_markdown(rows):
     if len({r['benchmark_version'] for r in rows})>1:notes.append('Runs used different benchmark versions and are not directly comparable.')
     if len({json.dumps(r['host'],sort_keys=True) for r in rows})>1:notes.append('Runs were made on different hosts; times are not directly comparable.')
     if len({r['isolation'] for r in rows})>1:notes.append('Runs mix container and host isolation; the environments differ.')
+    if len({(r['evaluation']['eval_version'],r['evaluation']['eval_commit']) for r in rows if r['evaluation']})>1:notes.append('Runs were scored with different versions of the hidden suite; re-run `evaluate` before comparing test results.')
+    if any(r['evaluations_failed'] for r in rows):notes.append('Some evaluations could not be completed; see the run folders.')
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
     if notes:out+=['','## Notes','']+['- '+n for n in notes]
@@ -676,6 +753,7 @@ def doctor(cfg):
     c=cfg['container'];rt=shutil.which(c['runtime'])
     print(f'container runtime {c["runtime"]}:',rt or 'NOT FOUND')
     if rt:print(f'container image {c["image"]}:',image_id(cfg) or 'NOT BUILT (run: python3 run.py build-image)')
+    print('evaluation repository:',eval_dir(cfg) or 'NOT FOUND (runs will not be scored)')
     print('profiles:')
     for name in sorted(cfg['profiles']):
         p=resolve_profile(cfg,name)
@@ -685,7 +763,7 @@ def main():
     cfg=config()
     p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
-    for name in ('doctor','build-image','compare','init','run','report','unblock'):
+    for name in ('doctor','build-image','compare','init','run','evaluate','report','unblock'):
         q=sub.add_parser(name)
         if name=='compare':q.add_argument('--out',help='folder for comparison.md and comparison.json (default: runs root)')
         if name not in ('doctor','build-image','compare'):
@@ -695,6 +773,7 @@ def main():
         if name in ('init','run'):
             q.add_argument('--no-container',action='store_true',help='run the agent directly on the host instead of in the sandbox container')
         if name=='run':
+            q.add_argument('--no-eval',action='store_true',help='skip the hidden evaluation after each completed task')
             q.add_argument('--refresh-login',action='store_true',help='copy the host CLI login into the run again')
             q.add_argument('--allow-unsafe',action='store_true',help='host mode only: let the CLI skip its permission prompts');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
         if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES);q.add_argument('--cycle',type=int)
@@ -712,6 +791,11 @@ def main():
         return
     if a.action=='init':print('Workspace:',init(run));return
     if a.action=='report':report(run);return
+    if a.action=='evaluate':
+        if not eval_dir(cfg):p.error('evaluation repository not found (see "eval" in benchmark.json)')
+        with lock_run(run):
+            st=read(run.state);evaluate_run(run,st,'final');write(run.state,st)
+        report(run);return
     if a.action=='unblock':
         st=read(run.state);ts=st['tasks'][a.task]
         if ts['status']!='BLOCKED':raise RuntimeError('Task is not BLOCKED')
@@ -730,7 +814,7 @@ def main():
         if (b/'inflight.json').exists():
             print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
             (b/'inflight.json').unlink()
-        st=read(run.state);n=0
+        st=read(run.state);n=0;n_warned=[]
         while True:
             if a.max_phases is not None and n>=a.max_phases:break
             if st['spent_seconds']>=cfg['max_run_seconds']:print('time budget exceeded');break
@@ -743,6 +827,10 @@ def main():
                 if run.container:stop_container(run)
                 raise
             write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
+            if st['tasks'][task]['status']=='DONE' and not a.no_eval:
+                if evaluate_run(run,st,task) is None and not n_warned:
+                    print('NOTE: hidden evaluation skipped, evaluation repository not found');n_warned.append(1)
+                write(run.state,st)
         if run.container:stop_container(run)
         report(run)
 

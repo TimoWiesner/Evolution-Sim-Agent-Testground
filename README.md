@@ -6,7 +6,7 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness is under active development. Hidden acceptance tests, packaging and the parallel tracks are planned but not built yet.
+> Status: the harness is under active development. Packaging of results and the parallel tracks are planned but not built yet.
 
 ## Quick start (Ubuntu)
 
@@ -63,6 +63,7 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
   home/             the container's home directory; holds a copy of the CLI login, never publish it
   logs/*.jsonl      full raw CLI events (may contain sensitive text)
   handoff-archive/  handoffs from retried phases
+  eval/             hidden test results and logs per completed task
 ```
 
 `--track` is `sequential` for now. `--run-id` defaults to `r1`; use another id to repeat a run.
@@ -73,8 +74,9 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
 python3 run.py doctor
 python3 run.py build-image
 python3 run.py init    --profile local-qwen
-python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--quiet] [--dry-run] [--refresh-login]
+python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--quiet] [--dry-run] [--refresh-login] [--no-eval]
 python3 run.py report  --profile local-qwen
+python3 run.py evaluate --profile local-qwen           # score the current state again
 python3 run.py compare [--out DIR]
 python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --cycle 1
 ```
@@ -122,7 +124,16 @@ Reports and the comparison give, per run:
 
 Token counts are normalised across CLIs: cached input is listed separately because it dominates Claude Code's totals and is billed at a fraction of the price. Missing usage is shown as unknown, never as zero. Codex reports no cost. Speed and cost are separate columns and are never folded into a quality figure.
 
-A task currently counts as done when the agent's own review says PASS and the baseline checks hold. Those checks confirm only that the workspace is intact, **not** that the simulation works. Until the hidden acceptance tests exist, judge product quality with the manual rubric in `acceptance/MANUAL_REVIEW.md`.
+### Hidden tests
+
+Product quality is scored by a black-box suite kept in a separate private repository, so agents cannot read it and it cannot leak into training data. It currently has 41 pass/fail checks in eight categories: contract conformance, determinism, checkpoints, ecology, robustness, performance, distributable and UI start-up.
+
+- The suite runs after every completed task, on the committed state, and only uses the interface contract. A check counts once the task that owns it is done.
+- Results are stored with the run and are **never shown to the agent**. They do not influence the run; a task still counts as done when the agent's own review passes. The gap between the two is part of what the benchmark shows.
+- Scoring happens in two fresh containers: the first runs `./setup.sh` and `./build.sh` with network access but without the tests; the second runs the tests with no network at all.
+- Results are reported as passed/total per category. There is no weighted total, so a strong category cannot hide a broken one.
+
+Without the private repository (`eval.path` in `benchmark.json`) the harness still works; runs are simply not scored. The usability of the UI is judged by hand with the rubric in `acceptance/MANUAL_REVIEW.md`.
 
 ## Safety
 

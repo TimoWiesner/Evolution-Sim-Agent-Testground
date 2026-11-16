@@ -15,6 +15,10 @@
     "cpus": null,
     "memory": null
   },
+  "eval": {
+    "path": "../Evolution-Sim-Agent-Eval",
+    "timeout_seconds": 3600
+  },
   "clis": {
     "claude": { "executable": "claude" },
     "codex": { "executable": "codex" },

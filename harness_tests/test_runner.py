@@ -71,4 +71,13 @@ class RunnerTests(unittest.TestCase):
    self.assertTrue(any('docs/CONTRACT.md' in c for c in sp[t]['acceptance_criteria']),t)
    md=(core.ROOT/'tasks'/t/'task.md').read_text()
    for c in sp[t]['acceptance_criteria']:self.assertIn(c,md)
+ def test_evaluation_keeps_tests_away_from_the_network(self):
+  from harness import core
+  cfg=config()
+  prep,test=core.evaluation_commands(cfg,'n','img','/p','/o','/secret-eval',['TASK-002','TASK-001'])
+  self.assertFalse(any('secret-eval' in x for x in prep))
+  self.assertEqual(prep[prep.index('--network')+1],'pasta:--map-guest-addr,none')
+  self.assertEqual(test[test.index('--network')+1],'none')
+  self.assertIn('/secret-eval:/eval:ro',test)
+  self.assertEqual(test[test.index('--done')+1],'TASK-001,TASK-002')
 if __name__=='__main__':unittest.main()

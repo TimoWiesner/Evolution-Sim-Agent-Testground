@@ -14,6 +14,8 @@ Three executable files at the workspace root. All are non-interactive, work from
 | `./evosim` | Launcher for the commands in section 2. Must work after `./setup.sh` has run once. |
 | `./build.sh` | Produces the distributable in `dist/` (section 6). May assume `./setup.sh` has run. |
 
+`./setup.sh` and `./build.sh` may use the network. `./evosim` and `dist/evosim` must work without network access.
+
 Tasks introduce these step by step; a command only has to work once the task that owns it is done.
 
 ## 2. Commands

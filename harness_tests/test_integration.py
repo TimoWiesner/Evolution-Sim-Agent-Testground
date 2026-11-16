@@ -31,6 +31,7 @@ class Integration(unittest.TestCase):
   cfg=core.read(self.root/'benchmark.json')
   cfg['runs_root']=str(pathlib.Path(self.tmp.name)/'runs')
   cfg['clis']['opencode']['executable']=str(fake)
+  cfg['eval']={'path':None,'timeout_seconds':60}
   cfg['profiles']={'fake':{'cli':'opencode','model':'fake/model-a'}}
   core.write(self.root/'benchmark.json',cfg)
   self.patcher=patch.object(core,'ROOT',self.root);self.patcher.start();self.addCleanup(self.patcher.stop)
@@ -100,5 +101,15 @@ class Integration(unittest.TestCase):
   self.assertIn('| sequential | fake | fake/model-a | 2 |',md)
   self.assertTrue((self.run_.root/'comparison.json').exists())
   self.assertIsNone(core.total([{'usage':{'tokens':None}},{'usage':{'tokens':5}}],'tokens'))
+ def test_evaluation_is_recorded_and_compared(self):
+  self.assertIsNone(core.evaluate_run(self.run_,self.s,'TASK-001'))
+  self.s['evaluations'].append({'label':'TASK-002','commit':'abc','eval_commit':'def','eval_version':1,'passed':3,'due':4,'total':41,
+   'categories':{'contract':{'passed':3,'due':4,'total':10}},'metrics':{'ticks_per_second':250.0},'seconds':5,'timestamp':'t'})
+  self.s['evaluations'].append({'label':'TASK-003','error':'boom'})
+  core.write(self.run_.state,self.s)
+  row=core.summarize(core.read(self.run_.meta),self.s)
+  self.assertEqual((row['evaluation']['label'],row['evaluations_failed']),('TASK-002',1))
+  md=core.comparison_markdown([row])
+  self.assertIn('| sequential | fake | r1 | TASK-002 | 3/41 | 3/10 | 250.0 |',md)
 
 if __name__=='__main__':unittest.main()
