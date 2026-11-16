@@ -24,6 +24,7 @@ if match:
   elif os.getenv('FAKE_CONFLICT')=='1' and phase=='implement':state.write_text(task+'\\n')
   else:state.write_text(state.read_text() if os.getenv('FAKE_CONFLICT')=='1' else 'updated\\n')
   if phase=='implement':(pathlib.Path.cwd()/(task+'.txt')).write_text(task)
+if os.getenv('FAKE_LIMIT')=='1':print(json.dumps({'type':'error','error':{'message':'429 Too Many Requests: usage limit reached'}}),flush=True);sys.exit(1)
 print(json.dumps({'type':'step_finish','part':{'tokens':{'input':10,'output':5},'cost':0.01}}),flush=True)
 '''
 
@@ -65,6 +66,20 @@ class Integration(Base):
    self.phase()
   self.assertEqual(self.s['tasks']['TASK-001']['status'],'BLOCKED')
   self.assertIn('HANDOFF_INVALID',self.s['tasks']['TASK-001']['blocked_reason'])
+ def test_rate_limit_is_not_a_model_failure(self):
+  with patch.dict(os.environ,{'FAKE_LIMIT':'1','FAKE_MISSING':'1'}):
+   self.phase();self.phase();self.phase()
+  t=self.s['tasks']['TASK-001']
+  self.assertEqual((t['status'],t['phase'],t['recovery'],self.s['events']),('PENDING','plan',0,[]))
+  self.assertEqual(len(self.s['rate_limits']),3);self.assertTrue(self.s['paused_until'])
+  self.assertFalse(core.wait_for_limit(self.s,self.run_.cfg,stop_on_limit=True))
+  self.s['paused_until']=1
+  with patch.object(core.time,'sleep') as sleep:self.assertTrue(core.wait_for_limit(self.s,self.run_.cfg))
+  sleep.assert_called_once();self.assertIsNone(self.s['paused_until'])
+  self.phase();self.assertEqual(t['phase'],'implement')
+  out=json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','resetsAt':123}})
+  self.assertEqual(core.rate_limited('claude',out),{'resets_at':123})
+  self.assertIsNone(core.rate_limited('claude',out.replace('rejected','allowed_warning')))
  def test_generated_handoff_is_not_protected(self):
   hand=self.w/'tasks/TASK-001/handoffs/plan-cycle1.md'
   hand.parent.mkdir(exist_ok=True);hand.write_text('notes')

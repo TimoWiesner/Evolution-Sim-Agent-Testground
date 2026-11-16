@@ -92,6 +92,7 @@ python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --
 - `--refresh-login` copies your current host CLI login into the run again, for when the run's copy has expired.
 - `--no-container` runs the agent directly on the host instead of in the sandbox; `--allow-unsafe` then lets the CLI skip its permission prompts. Read [docs/SECURITY.md](docs/SECURITY.md) first. A run stays in the mode it started in.
 - `unblock` is an **operator intervention** and must be disclosed when comparing results. It keeps the code and Git history and resets the retry counter for one task.
+- Provider limits: when a CLI reports a usage or rate limit, the refused call is not counted as a failure. The run waits until the limit resets (up to 6 hours, `max_limit_wait_seconds`) and repeats the phase; `--stop-on-limit` ends the run instead so you can resume it later.
 - `--workers N` sets the number of agents for a new parallel run; it cannot change later.
 - Ctrl+C: stop between phases if possible. An interrupted phase leaves `inflight.json`, which is reported on the next start; the phase is then repeated.
 

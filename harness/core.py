@@ -391,6 +391,45 @@ def usage(cli, out):
     if not seen or not total:return {'tokens':None,**dict.fromkeys(TOKEN_KINDS),**extra}
     return {'tokens':total,**{k:int(v) for k,v in t.items()},**extra}
 
+LIMIT_WORDS = re.compile(r'usage limit|rate.?limit|too many requests|\b429\b|quota',re.I)
+
+def rate_limited(cli, out):
+    """Did the provider refuse this call because a usage or rate limit was reached?
+
+    Returns None, or a dict with `resets_at` (epoch seconds, None when the CLI does not say)."""
+    hit=False;resets=None
+    for line in out.splitlines():
+        try:o=json.loads(line)
+        except (ValueError,TypeError):continue
+        if not isinstance(o,dict):continue
+        if cli=='claude':
+            info=o.get('rate_limit_info') if o.get('type')=='rate_limit_event' else None
+            if isinstance(info,dict) and info.get('status')=='rejected':
+                hit=True
+                if isinstance(info.get('resetsAt'),(int,float)):resets=max(resets or 0,info['resetsAt'])
+            if o.get('type')=='result' and o.get('api_error_status')==429:hit=True
+        elif o.get('type') in ('error','turn.failed') and LIMIT_WORDS.search(json.dumps(o)):hit=True
+    return {'resets_at':resets} if hit else None
+
+def note_rate_limit(state,task,phase,cycle,limit,label):
+    """A refused call is not the model's failure: it is not an event, costs no retry and pauses the run."""
+    until=limit['resets_at'] or time.time()+900
+    state.setdefault('rate_limits',[]).append({'task':task,'phase':phase,'cycle':cycle,'resets_at':limit['resets_at'],'timestamp':now()})
+    state['paused_until']=max(state.get('paused_until') or 0,until)
+    print(f'RATE LIMIT {label}: the provider refused the call; the phase will be repeated',flush=True)
+
+def wait_for_limit(state,cfg,stop_on_limit=False):
+    """Sleep until the provider's limit resets. Returns False when the run should end instead."""
+    until=state.get('paused_until')
+    if not until:return True
+    wait=max(until-time.time(),0)+60;when=dt.datetime.fromtimestamp(until).strftime('%Y-%m-%d %H:%M')
+    if stop_on_limit or wait>cfg.get('max_limit_wait_seconds',21600):
+        print(f'Provider limit reached; it resets around {when}. Start the same command again after that.',flush=True);return False
+    print(f'Provider limit reached; waiting until about {when} ({fmt_time(wait)}). Ctrl+C stops the run; it can be resumed.',flush=True)
+    time.sleep(wait)
+    state['paused_until']=None;state['rate_limit_wait_seconds']=round(state.get('rate_limit_wait_seconds',0)+wait)
+    return True
+
 def short_event(cli, line):
     try:o=json.loads(line)
     except ValueError:return None
@@ -624,6 +663,8 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     r=agent_call(run,task,phase,cycle,label,unsafe,live)
     with lock:
         hand_ok,reason=handoff_valid(hand,task,phase,cycle)
+        limit=None if hand_ok and r['exit_code']==0 else rate_limited(run.cli,r['output'])
+        if limit:note_rate_limit(state,task,phase,cycle,limit,label);return True
         intact,integrity_error=protected_ok(w)
         if not intact:reason='Protected benchmark spec modified: '+integrity_error
         chk=external_checks(w,task,phase,cfg['benchmark_test_timeout_seconds']) if hand_ok and intact and r['exit_code']==0 else {'exit_code':1,'output':'not run'}
@@ -711,6 +752,8 @@ def execute_merge(run,state,task,unsafe=False,live=True,lock=None):
     with lock:
         if files:
             hand_ok,reason=handoff_valid(hand,task,'merge',cycle)
+            limit=None if hand_ok and r['exit_code']==0 else rate_limited(run.cli,r['output'])
+            if limit:note_rate_limit(state,task,'merge',cycle,limit,label);reset_main(w,before);return True
             intact,integrity_error=protected_ok(w)
             if not intact:reason='Protected benchmark spec modified: '+integrity_error
             left=conflict_markers(w,files) if hand_ok and intact else []
@@ -759,7 +802,7 @@ def budget_reached(state,cfg):
     if cfg['max_tokens'] is not None and (not state['tokens_complete'] or state['reported_tokens']>=cfg['max_tokens']):return 'token budget reached/unknown'
     return None
 
-def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True):
+def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,stop_on_limit=False):
     """Keep up to `run.workers` agents busy. Every job is one phase or one merge of one task.
 
     Hidden evaluations run beside the workers, one at a time, and never take a worker slot."""
@@ -786,10 +829,16 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True)
                 stop=budget_reached(state,cfg)
                 free=run.workers-len(running)
                 if max_phases is not None:free=min(free,max_phases-n)
-                new=[] if stop else parallel_jobs(state,running.values(),free)
+                paused=bool(state.get('paused_until'))
+                new=[] if stop or paused else parallel_jobs(state,running.values(),free)
             for task in new:running[pool.submit(job,task)]=task
             n+=len(new)
             if not running:
+                if paused and not stop and (max_phases is None or n<max_phases):
+                    # Everything has come to rest; waiting for the provider is not part of the elapsed time.
+                    t0=time.monotonic();go_on=wait_for_limit(state,cfg,stop_on_limit);began+=time.monotonic()-t0
+                    write(run.state,state)
+                    if go_on:continue
                 if stop:print(stop)
                 break
             for f in wait(running,return_when=FIRST_COMPLETED)[0]:
@@ -840,6 +889,7 @@ def summarize(meta,state):
               'merges_failed':sum(not m['merged'] for m in merges),
               'merge_agent_seconds':round(sum(e.get('seconds',0) for e in events if e.get('phase')=='merge'),2),
               # Delegation to the CLI's own subagents; a count of None means the CLI does not report one.
+              'rate_limit_hits':len(state.get('rate_limits',[])),'rate_limit_wait_seconds':state.get('rate_limit_wait_seconds',0),
               'phases_delegated':sum(bool(e['usage'].get('delegated')) for e in events),
               'subagents_started':None if any(e['usage'].get('subagents') is None for e in events) else sum(e['usage']['subagents'] for e in events)}
     return {**parallel,'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
@@ -1026,6 +1076,7 @@ def comparison_markdown(rows):
     if len({(r['evaluation'].get('eval_version'),r['evaluation'].get('eval_commit')) for r in rows if r['evaluation']})>1:notes.append('Runs were scored with different versions of the hidden suite; re-run `evaluate` before comparing test results.')
     if any(r['evaluations_failed'] for r in rows):notes.append('Some evaluations could not be completed; see the run folders.')
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
+    if any(r.get('rate_limit_hits') for r in rows):notes.append('Some runs were paused by a provider usage limit; refused calls are repeated and not counted as failures or agent time.')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
     if notes:out+=['','## Notes','']+['- '+n for n in notes]
     return '\n'.join(out)+'\n'
@@ -1078,6 +1129,7 @@ def main():
             q.add_argument('--workers',type=int,help='parallel track: agents working at the same time (default: "workers" of the profile); fixed for the whole run')
         if name=='run':
             q.add_argument('--no-eval',action='store_true',help='skip the hidden evaluation after each completed task')
+            q.add_argument('--stop-on-limit',action='store_true',help='end the run when the provider reports a usage limit instead of waiting for the reset')
             q.add_argument('--refresh-login',action='store_true',help='copy the host CLI login into the run again')
             q.add_argument('--allow-unsafe',action='store_true',help='host mode only: let the CLI skip its permission prompts');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
         if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES+('merge',));q.add_argument('--cycle',type=int)
@@ -1127,7 +1179,7 @@ def main():
         ensure_local_git(w)
         if run.track=='parallel':
             st=read(run.state)
-            try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet)
+            try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet,a.stop_on_limit)
             finally:
                 if run.container:stop_container(run)
             report(run);return
@@ -1146,6 +1198,10 @@ def main():
                 if run.container:stop_container(run)
                 raise
             write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
+            if st.get('paused_until'):
+                n-=1;go_on=wait_for_limit(st,cfg,a.stop_on_limit);write(run.state,st)
+                if not go_on:break
+                continue
             if st['tasks'][task]['status']=='DONE' and not a.no_eval:
                 if evaluate_run(run,st,task) is None and not n_warned:
                     print('NOTE: hidden evaluation skipped, evaluation repository not found');n_warned.append(1)
