@@ -92,7 +92,7 @@ class Run:
         self.home = self.base/'home'   # container $HOME; holds copied logins, never publish it
 
 def initial_state():
-    return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
+    return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'interventions':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
 
 def cli_version(executable):
     tool = shutil.which(executable)
@@ -293,9 +293,17 @@ def adapter(profile, unsafe=False):
         raise RuntimeError(f'No adapter for cli {cli!r}')
     return base + list(profile.get('extra_args') or [])
 
+TOKEN_KINDS = ('input_tokens','cached_input_tokens','output_tokens')
+
 def usage(cli, out):
-    """Sum the usage a CLI reports over one process. None means 'not reported', never zero."""
-    tok=cost=model=None
+    """Sum the usage a CLI reports over one process. None means 'not reported', never zero.
+
+    Tokens are normalised so CLIs can be compared: input_tokens is fresh (uncached) input including
+    cache writes, cached_input_tokens is input read from the provider cache, output_tokens includes
+    reasoning. `tokens` is their sum."""
+    cost=model=None;seen=False;t=dict.fromkeys(TOKEN_KINDS,0)
+    def num(d,*keys):
+        return sum(d.get(k) or 0 for k in keys if isinstance(d.get(k),(int,float)))
     for line in out.splitlines():
         try:o=json.loads(line)
         except (ValueError,TypeError):continue
@@ -306,25 +314,33 @@ def usage(cli, out):
             if o.get('type')=='result':
                 c=o.get('total_cost_usd')
                 if isinstance(c,(int,float)): cost=(cost or 0)+float(c)
-                u=o.get('usage') or {}
+                u=o.get('usage')
                 if isinstance(u,dict):
-                    v=sum(u.get(k,0) or 0 for k in ('input_tokens','output_tokens','cache_creation_input_tokens','cache_read_input_tokens'))
-                    if v:tok=(tok or 0)+int(v)
+                    seen=True
+                    t['input_tokens']+=num(u,'input_tokens','cache_creation_input_tokens')
+                    t['cached_input_tokens']+=num(u,'cache_read_input_tokens')
+                    t['output_tokens']+=num(u,'output_tokens')
         elif cli=='codex' and o.get('type')=='turn.completed':
-            u=o.get('usage') or {}
+            u=o.get('usage')
             if isinstance(u,dict):
-                v=(u.get('input_tokens') or 0)+(u.get('output_tokens') or 0)
-                if v:tok=(tok or 0)+int(v)
+                seen=True;cached=num(u,'cached_input_tokens')
+                t['input_tokens']+=max(num(u,'input_tokens')-cached,0)
+                t['cached_input_tokens']+=cached
+                t['output_tokens']+=num(u,'output_tokens')
         elif cli=='opencode':
             part=o.get('part') or {}
             if isinstance(part,dict):
                 c=part.get('cost')
                 if isinstance(c,(int,float)):cost=(cost or 0)+c
-                t=part.get('tokens') or {}
-                if isinstance(t,dict):
-                    v=(t.get('input') or 0)+(t.get('output') or 0)+(t.get('reasoning') or 0)
-                    if v:tok=(tok or 0)+v
-    return {'tokens':tok,'cost_usd':cost,'reported_model':model}
+                u=part.get('tokens')
+                if isinstance(u,dict):
+                    seen=True;cache=u.get('cache') if isinstance(u.get('cache'),dict) else {}
+                    t['input_tokens']+=num(u,'input')+num(cache,'write')
+                    t['cached_input_tokens']+=num(cache,'read')
+                    t['output_tokens']+=num(u,'output','reasoning')
+    total=int(sum(t.values()))
+    if not seen or not total:return {'tokens':None,**dict.fromkeys(TOKEN_KINDS),'cost_usd':cost,'reported_model':model}
+    return {'tokens':total,**{k:int(v) for k,v in t.items()},'cost_usd':cost,'reported_model':model}
 
 def short_event(cli, line):
     try:o=json.loads(line)
@@ -538,18 +554,109 @@ def choose_ready(state):
     pending=sorted(k for k in ids if state['tasks'][k]['status']=='PENDING')
     return pending[0] if pending else None
 
-def report(run):
-    st=read(run.state);meta=read(run.meta);tasks=st['tasks']
+def total(events,key):
+    """Sum a usage field over all phases; None as soon as one phase did not report it."""
+    values=[e['usage'].get(key) for e in events]
+    return None if any(v is None for v in values) else sum(values)
+
+def summarize(meta,state):
+    """Comparable figures for one run, derived only from run.json and state.json."""
+    tasks=state['tasks'];events=state['events']
     counts={x:sum(v['status']==x for v in tasks.values()) for x in ('PENDING','ACTIVE','DONE','BLOCKED')}
-    events=st['events'];classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
-    reported=sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')})
-    result={'benchmark_version':meta['benchmark_version'],'isolation':meta.get('isolation','host'),'profile':run.name,'track':run.track,'run_id':run.run_id,'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],'reported_models':reported,'harness_commit':meta['harness_commit'],'host':meta['host'],
-            'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),'phases_attempted':len(events),'failure_classes':classes,'reported_total_tokens':st['reported_tokens'] if st['tokens_complete'] else None,'reported_total_cost_usd':round(st['reported_cost_usd'],4) if st['cost_complete'] else None,'wall_seconds_agent_calls':round(st['spent_seconds'],2),'unreported_usage_warning':not(st['tokens_complete'] and st['cost_complete']),'tasks':tasks}
+    classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
+    done=[t for t in tasks.values() if t['status']=='DONE']
+    cost=total(events,'cost_usd')
+    return {'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
+            'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],
+            'reported_models':sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')}),
+            'isolation':meta.get('isolation','host'),'harness_commit':meta['harness_commit'],'host':meta['host'],'created':meta['created'],
+            'finished':counts['PENDING']+counts['ACTIVE']==0 or not ready(state),
+            'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),
+            'first_cycle_pass_ratio':round(sum(t['cycle']==1 for t in done)/len(done),4) if done else None,
+            'phases_attempted':len(events),'phases_failed':sum(1 for e in events if e.get('failure_class')),'failure_classes':classes,
+            'operator_interventions':len(state.get('interventions',[])),
+            'reported_total_tokens':total(events,'tokens'),**{'reported_'+k:total(events,k) for k in TOKEN_KINDS},
+            'reported_total_cost_usd':None if cost is None else round(cost,4),
+            'wall_seconds_agent_calls':round(state['spent_seconds'],2),
+            'unreported_usage_warning':total(events,'tokens') is None or cost is None}
+
+def report(run):
+    st=read(run.state);result=summarize(read(run.meta),st);result['tasks']=st['tasks']
     manual=run.base/'manual-review.json'
     if manual.exists():result['manual_review']=read(manual)
     write(run.base/'report.json',result)
     print(json.dumps({k:v for k,v in result.items() if k not in ('tasks','host')},indent=2))
     return result
+
+# --- comparison --------------------------------------------------------------
+
+def all_runs(cfg):
+    rows=[]
+    for meta in sorted(runs_root(cfg).glob('*/*/*/run.json')):
+        state=meta.with_name('state.json')
+        if state.exists():rows.append(summarize(read(meta),read(state)))
+    return rows
+
+def fmt_count(v):
+    if v is None:return '—'
+    for limit,suffix in ((1e9,'B'),(1e6,'M'),(1e3,'k')):
+        if v>=limit:return f'{v/limit:.1f}{suffix}'
+    return str(int(v)) if float(v).is_integer() else f'{v:.1f}'
+
+def fmt_time(v):
+    if v is None:return '—'
+    m,s=divmod(int(round(v)),60);h,m=divmod(m,60)
+    return f'{h}h {m:02d}m' if h else f'{m}m {s:02d}s'
+
+def fmt_cost(v):return '—' if v is None else f'${v:.2f}'
+def fmt_pct(v):return '—' if v is None else f'{v*100:.0f}%'
+
+def median(values):
+    import statistics
+    return None if not values or any(v is None for v in values) else statistics.median(values)
+
+def table(header,rows):
+    lines=['| '+' | '.join(header)+' |','|'+'|'.join('---' for _ in header)+'|']
+    return '\n'.join(lines+['| '+' | '.join(str(c) for c in r)+' |' for r in rows])
+
+def comparison_markdown(rows):
+    """Speed and cost are separate columns and never folded into a quality figure."""
+    if not rows:return '# Benchmark comparison\n\nNo runs found.\n'
+    groups={}
+    for r in rows:groups.setdefault((r['track'],r['profile']),[]).append(r)
+    out=['# Benchmark comparison','',f'{len(rows)} run(s), {len(groups)} profile/track combination(s). '
+         '"—" means the CLI did not report the value; it is never counted as zero. '
+         'With more than one run, the summary shows the median.','','## Summary by profile and track','']
+    out.append(table(['Track','Profile','Model','Runs','Tasks done','First-cycle pass','Failed phases','Agent time','Fresh input','Cached input','Output','Cost'],
+        [[track,profile,g[0]['model'] or 'CLI default',len(g),fmt_pct(median([r['completed_ratio'] for r in g])),fmt_pct(median([r['first_cycle_pass_ratio'] for r in g])),
+          fmt_count(median([r['phases_failed'] for r in g])),fmt_time(median([r['wall_seconds_agent_calls'] for r in g])),
+          fmt_count(median([r['reported_input_tokens'] for r in g])),fmt_count(median([r['reported_cached_input_tokens'] for r in g])),
+          fmt_count(median([r['reported_output_tokens'] for r in g])),fmt_cost(median([r['reported_total_cost_usd'] for r in g]))]
+         for (track,profile),g in sorted(groups.items())]))
+    out+=['','## Every run','']
+    out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
+        [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",r['status_counts']['BLOCKED'],
+          r['phases_attempted'],r['phases_failed'],r['operator_interventions'],fmt_time(r['wall_seconds_agent_calls']),fmt_count(r['reported_total_tokens']),fmt_cost(r['reported_total_cost_usd']),
+          ', '.join(r['reported_models']) or '—',r['cli_version'] or r['cli'],r['isolation'],(r['harness_commit'] or '—')[:7]+('*' if (r['harness_commit'] or '').endswith('-dirty') else '')]
+         for r in rows]))
+    notes=[]
+    if any((r['harness_commit'] or '').endswith('-dirty') for r in rows):notes.append('`*` harness had uncommitted changes when the run started.')
+    if len({(r['harness_commit'] or '').replace('-dirty','') for r in rows})>1:notes.append('Runs used different harness commits; compare with care.')
+    if len({r['benchmark_version'] for r in rows})>1:notes.append('Runs used different benchmark versions and are not directly comparable.')
+    if len({json.dumps(r['host'],sort_keys=True) for r in rows})>1:notes.append('Runs were made on different hosts; times are not directly comparable.')
+    if len({r['isolation'] for r in rows})>1:notes.append('Runs mix container and host isolation; the environments differ.')
+    if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
+    if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
+    if notes:out+=['','## Notes','']+['- '+n for n in notes]
+    return '\n'.join(out)+'\n'
+
+def compare(cfg,out_dir=None):
+    rows=all_runs(cfg);out=pathlib.Path(out_dir).expanduser() if out_dir else runs_root(cfg)
+    md=comparison_markdown(rows);out.mkdir(parents=True,exist_ok=True)
+    (out/'comparison.md').write_text(md,encoding='utf-8')
+    write(out/'comparison.json',{'generated':now(),'runs':rows})
+    print(md);print(f'Written: {out/"comparison.md"} and {out/"comparison.json"}')
+    return rows
 
 @contextmanager
 def lock_run(run):
@@ -577,9 +684,10 @@ def main():
     cfg=config()
     p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
-    for name in ('doctor','build-image','init','run','report','unblock'):
+    for name in ('doctor','build-image','compare','init','run','report','unblock'):
         q=sub.add_parser(name)
-        if name not in ('doctor','build-image'):
+        if name=='compare':q.add_argument('--out',help='folder for comparison.md and comparison.json (default: runs root)')
+        if name not in ('doctor','build-image','compare'):
             q.add_argument('--profile',choices=sorted(cfg['profiles']),required=True,help='named CLI + model combination from benchmark.json')
             q.add_argument('--track',choices=TRACKS,default='sequential')
             q.add_argument('--run-id',default='r1',help='distinguishes repeated runs of the same profile and track')
@@ -592,6 +700,7 @@ def main():
     a=p.parse_args()
     if a.action=='doctor':doctor(cfg);return
     if a.action=='build-image':sys.exit(build_image(cfg))
+    if a.action=='compare':compare(cfg,a.out);return
     run=Run(a.profile,a.track,a.run_id,cfg,container=not getattr(a,'no_container',False))
     if a.action=='run' and a.dry_run:
         st=read(run.state) if run.state.exists() else initial_state()
@@ -608,6 +717,7 @@ def main():
         ts['status']='ACTIVE';ts['recovery']=0;ts.pop('blocked_reason',None)
         if a.phase:ts['phase']=a.phase
         if a.cycle:ts['cycle']=a.cycle
+        st.setdefault('interventions',[]).append({'action':'unblock','task':a.task,'phase':ts['phase'],'cycle':ts['cycle'],'timestamp':now()})
         write(run.state,st);print('Unblocked',a.task,ts['phase'],ts['cycle']);return
     with lock_run(run):
         b=run.base;w=run.workspace

@@ -84,5 +84,16 @@ class Integration(unittest.TestCase):
   with patch('builtins.print'):
    r=core.report(self.run_)
   self.assertEqual((r['profile'],r['model'],r['phases_attempted']),('fake','fake/model-a',1))
+ def test_compare_lists_runs_and_keeps_unknown_distinct(self):
+  self.phase();core.write(self.run_.state,self.s)
+  other=core.Run('fake',run_id='r2');core.init(other)
+  with patch('builtins.print'):
+   rows=core.compare(self.run_.cfg)
+  self.assertEqual([r['run_id'] for r in rows],['r1','r2'])
+  self.assertEqual((rows[0]['reported_total_tokens'],rows[0]['phases_attempted'],rows[0]['finished']),(15,1,False))
+  md=(self.run_.root/'comparison.md').read_text()
+  self.assertIn('| sequential | fake | fake/model-a | 2 |',md)
+  self.assertTrue((self.run_.root/'comparison.json').exists())
+  self.assertIsNone(core.total([{'usage':{'tokens':None}},{'usage':{'tokens':5}}],'tokens'))
 
 if __name__=='__main__':unittest.main()

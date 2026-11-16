@@ -6,7 +6,7 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness is under active development. Hidden acceptance tests, cross-run comparison, packaging and the parallel tracks are planned but not built yet.
+> Status: the harness is under active development. Hidden acceptance tests, packaging and the parallel tracks are planned but not built yet.
 
 ## Quick start (Ubuntu)
 
@@ -75,9 +75,11 @@ python3 run.py build-image
 python3 run.py init    --profile local-qwen
 python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--quiet] [--dry-run] [--refresh-login]
 python3 run.py report  --profile local-qwen
+python3 run.py compare [--out DIR]
 python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --cycle 1
 ```
 
+- `compare` reads every run under the runs root and writes `comparison.md` and `comparison.json`: one summary row per profile and track (median when there are several runs, with the run count shown) and one detail row per run.
 - `--quiet` hides the live event summary; the full JSONL log is still written.
 - `--refresh-login` copies your current host CLI login into the run again, for when the run's copy has expired.
 - `--no-container` runs the agent directly on the host instead of in the sandbox; `--allow-unsafe` then lets the CLI skip its permission prompts. Read [docs/SECURITY.md](docs/SECURITY.md) first. A run stays in the mode it started in.
@@ -99,7 +101,15 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 
 ## What is and is not measured today
 
-The report gives completion ratio, phases attempted, failure classes (`HANDOFF_INVALID`, `CLI_FAILURE`, `TIMEOUT`, `ACCEPTANCE_FAILURE`, `INFRA_INTEGRITY`), wall time, and tokens and cost where the CLI reports them. Missing usage is shown as unknown, never as zero.
+Reports and the comparison give, per run:
+
+- tasks done and blocked, and the share of done tasks that passed review in the first cycle
+- phases attempted and failed, by failure class (`HANDOFF_INVALID`, `CLI_FAILURE`, `TIMEOUT`, `ACCEPTANCE_FAILURE`, `INFRA_INTEGRITY`)
+- operator interventions (`unblock`)
+- agent wall time
+- tokens split into fresh input, cached input and output, and cost, where the CLI reports them
+
+Token counts are normalised across CLIs: cached input is listed separately because it dominates Claude Code's totals and is billed at a fraction of the price. Missing usage is shown as unknown, never as zero. Codex reports no cost. Speed and cost are separate columns and are never folded into a quality figure.
 
 A task currently counts as done when the agent's own review says PASS and the baseline checks hold. Those checks confirm only that the workspace is intact, **not** that the simulation works. Until the hidden acceptance tests exist, judge product quality with the manual rubric in `acceptance/MANUAL_REVIEW.md`.
 

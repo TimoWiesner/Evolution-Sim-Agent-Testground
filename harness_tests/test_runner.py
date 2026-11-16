@@ -34,8 +34,10 @@ class RunnerTests(unittest.TestCase):
  def test_usage_sums_and_reports_model(self):
   turn=json.dumps({'type':'turn.completed','usage':{'input_tokens':2,'output_tokens':3}})
   self.assertEqual(usage('codex',turn+'\n'+turn)['tokens'],10)
+  u=usage('codex',json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_input_tokens':80,'output_tokens':7}}))
+  self.assertEqual((u['input_tokens'],u['cached_input_tokens'],u['output_tokens'],u['tokens']),(20,80,7,107))
   out='\n'.join(json.dumps(x) for x in ({'type':'system','subtype':'init','model':'m-1'},{'type':'result','total_cost_usd':0.5,'usage':{'input_tokens':4,'output_tokens':6}}))
-  self.assertEqual(usage('claude',out),{'tokens':10,'cost_usd':0.5,'reported_model':'m-1'})
+  self.assertEqual(usage('claude',out),{'tokens':10,'input_tokens':4,'cached_input_tokens':0,'output_tokens':6,'cost_usd':0.5,'reported_model':'m-1'})
  def test_container_commands(self):
   from harness import core
   cfg=config();cfg['runs_root']='/tmp/evo-test-runs'
