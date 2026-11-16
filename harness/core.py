@@ -18,7 +18,7 @@ from contextlib import contextmanager
 BENCHMARK_VERSION = 1
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PHASES = ('plan', 'implement', 'review')
-TRACKS = ('sequential','parallel')
+TRACKS = ('sequential','parallel','subagents')
 # Paths inside the agent container.
 CONTAINER_WS = '/workspace'
 CONTAINER_HOME = '/root'
@@ -301,7 +301,7 @@ def ready(state):
 
 # --- CLI adapters ------------------------------------------------------------
 
-def adapter(profile, unsafe=False):
+def adapter(profile, unsafe=False, subagents=False):
     cli=profile['cli'];model=profile.get('model');base=[profile['executable']]
     if cli == 'claude':
         base+=['-p','--output-format','stream-json','--verbose']
@@ -309,7 +309,8 @@ def adapter(profile, unsafe=False):
         if unsafe: base.append('--dangerously-skip-permissions')
         if model: base+=['--model',model]
     elif cli == 'codex':
-        base+=['exec','--json','--ephemeral']
+        # Codex subagents need a stored session; --ephemeral makes every spawn fail.
+        base+=['exec','--json']+([] if subagents else ['--ephemeral'])
         base += ['--dangerously-bypass-approvals-and-sandbox'] if unsafe else ['--sandbox','workspace-write']
         if model: base+=['--model',model]
     elif cli == 'opencode':
@@ -328,8 +329,12 @@ def usage(cli, out):
 
     Tokens are normalised so CLIs can be compared: input_tokens is fresh (uncached) input including
     cache writes, cached_input_tokens is input read from the provider cache, output_tokens includes
-    reasoning. `tokens` is their sum."""
+    reasoning. `tokens` is their sum.
+
+    `delegated` says whether the agent handed work to subagents in this process, `subagents` how many
+    it started (None where the CLI does not report a number)."""
     cost=model=None;seen=False;t=dict.fromkeys(TOKEN_KINDS,0)
+    spawned=0 if cli!='codex' else None;delegated=False;task_calls=set()
     def num(d,*keys):
         return sum(d.get(k) or 0 for k in keys if isinstance(d.get(k),(int,float)))
     for line in out.splitlines():
@@ -342,12 +347,24 @@ def usage(cli, out):
             if o.get('type')=='result':
                 c=o.get('total_cost_usd')
                 if isinstance(c,(int,float)): cost=(cost or 0)+float(c)
-                u=o.get('usage')
-                if isinstance(u,dict):
+                u=o.get('usage');per_model=o.get('modelUsage')
+                if isinstance(per_model,dict) and per_model:
+                    # Per-model totals include the tokens of subagents; `usage` covers the main agent only.
+                    for m in per_model.values():
+                        if isinstance(m,dict):
+                            seen=True
+                            t['input_tokens']+=num(m,'inputTokens','cacheCreationInputTokens')
+                            t['cached_input_tokens']+=num(m,'cacheReadInputTokens')
+                            t['output_tokens']+=num(m,'outputTokens')
+                elif isinstance(u,dict):
                     seen=True
                     t['input_tokens']+=num(u,'input_tokens','cache_creation_input_tokens')
                     t['cached_input_tokens']+=num(u,'cache_read_input_tokens')
                     t['output_tokens']+=num(u,'output_tokens')
+                stats=o.get('subagent_stats')
+                if isinstance(stats,dict):spawned+=num(stats,'spawned')
+        elif cli=='codex' and (o.get('item') or {}).get('type')=='collab_tool_call':
+            delegated=True   # Codex shows that agents collaborated, but not how many were started
         elif cli=='codex' and o.get('type')=='turn.completed':
             u=o.get('usage')
             if isinstance(u,dict):
@@ -358,6 +375,8 @@ def usage(cli, out):
         elif cli=='opencode':
             part=o.get('part') or {}
             if isinstance(part,dict):
+                if part.get('type')=='tool' and part.get('tool')=='task':
+                    task_calls.add(part.get('callID') or part.get('id'))
                 c=part.get('cost')
                 if isinstance(c,(int,float)):cost=(cost or 0)+c
                 u=part.get('tokens')
@@ -367,8 +386,10 @@ def usage(cli, out):
                     t['cached_input_tokens']+=num(cache,'read')
                     t['output_tokens']+=num(u,'output','reasoning')
     total=int(sum(t.values()))
-    if not seen or not total:return {'tokens':None,**dict.fromkeys(TOKEN_KINDS),'cost_usd':cost,'reported_model':model}
-    return {'tokens':total,**{k:int(v) for k,v in t.items()},'cost_usd':cost,'reported_model':model}
+    if cli=='opencode':spawned=len(task_calls)
+    extra={'cost_usd':cost,'reported_model':model,'subagents':None if spawned is None else int(spawned),'delegated':delegated or bool(spawned)}
+    if not seen or not total:return {'tokens':None,**dict.fromkeys(TOKEN_KINDS),**extra}
+    return {'tokens':total,**{k:int(v) for k,v in t.items()},**extra}
 
 def short_event(cli, line):
     try:o=json.loads(line)
@@ -499,12 +520,17 @@ def merge_prompt(task,cycle,files,w,sandbox=False):
             f'The handoff MUST include task_id, phase ("merge"), cycle (integer), summary, changed_files, '
             f'decisions, tests, risks, next_steps, verdict ("N/A"), gaps. Write honest results, even on failure.')
 
-def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False):
+DELEGATION_NOTE=('DELEGATION: in this run you may hand parts of this phase to subagents (the helper agents your CLI can start), '
+                 'for example to explore the code base, to build clearly separable parts at the same time, or to verify work '
+                 'independently. This is encouraged where it helps and not required; decide yourself. You stay responsible for the '
+                 'result: check what subagents return, keep them inside this task, phase and workspace, and write the handoff yourself. ')
+
+def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False,delegate=False):
     if w is None: w=pathlib.Path.cwd()
     w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
-            + (SANDBOX_NOTE if sandbox else '') + (PARALLEL_NOTE if parallel else '') +
+            + (SANDBOX_NOTE if sandbox else '') + (PARALLEL_NOTE if parallel else '') + (DELEGATION_NOTE if delegate else '') +
             f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. '
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
@@ -537,11 +563,12 @@ def phase_argv(run,task,phase,cycle,unsafe=False,files=()):
     """Full command for one phase: the CLI adapter plus prompt, wrapped for the container if used."""
     timeout=run.profile['phase_timeout_seconds'];host,inside=run.place(task,phase)
     w=inside if run.container else host
+    sub=run.track=='subagents'
     if phase=='merge':prompt=merge_prompt(task,cycle,files,w,sandbox=run.container)
-    else:prompt=prompt_for(task,phase,cycle,w,sandbox=run.container,parallel=run.track=='parallel')
+    else:prompt=prompt_for(task,phase,cycle,w,sandbox=run.container,parallel=run.track=='parallel',delegate=sub)
     if run.container:
-        return container_exec_argv(run,adapter(run.profile,True)+[prompt],timeout,inside)
-    return adapter(run.profile,unsafe)+[prompt]
+        return container_exec_argv(run,adapter(run.profile,True,sub)+[prompt],timeout,inside)
+    return adapter(run.profile,unsafe,sub)+[prompt]
 
 def agent_call(run,task,phase,cycle,label,unsafe=False,live=True,files=()):
     """Run one fresh agent process for a phase and return the result of `cmd`."""
@@ -811,7 +838,10 @@ def summarize(meta,state):
               'merges':sum(m['merged'] for m in merges),'merge_conflicts':sum(m['conflict'] for m in merges),
               'merge_conflict_files':sum(len(m['conflict_files']) for m in merges),
               'merges_failed':sum(not m['merged'] for m in merges),
-              'merge_agent_seconds':round(sum(e.get('seconds',0) for e in events if e.get('phase')=='merge'),2)}
+              'merge_agent_seconds':round(sum(e.get('seconds',0) for e in events if e.get('phase')=='merge'),2),
+              # Delegation to the CLI's own subagents; a count of None means the CLI does not report one.
+              'phases_delegated':sum(bool(e['usage'].get('delegated')) for e in events),
+              'subagents_started':None if any(e['usage'].get('subagents') is None for e in events) else sum(e['usage']['subagents'] for e in events)}
     return {**parallel,'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
             'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],
             'reported_models':sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')}),
@@ -955,11 +985,22 @@ def comparison_markdown(rows):
             [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
              +[r['evaluation']['metrics'].get('ticks_per_second','—')] for r in scored]))
+    seq={}
+    for r in rows:
+        if r['track']=='sequential' and r['finished']:seq.setdefault(r['profile'],[]).append(r['wall_seconds_agent_calls'])
+    sub=[r for r in rows if r['track']=='subagents']
+    if sub:
+        def faster(r):
+            base=median(seq.get(r['profile'],[]))
+            return f"{base/r['wall_seconds_agent_calls']:.2f}×" if base and r['finished'] and r['wall_seconds_agent_calls'] else '—'
+        out+=['','## Subagent track','','Same tasks and phases as the sequential track, but the agent may hand work to its CLI\'s own subagents; whether it does is its decision. '
+              '"Phases with delegation" counts agent calls in which that happened. "Subagents started" is "—" where the CLI does not report a number (Codex). '
+              '"Speed-up" compares agent time with the finished sequential run(s) of the same profile. Tokens and cost of subagents are included where the CLI reports them.','']
+        out.append(table(['Profile','Run','Phases','Phases with delegation','Subagents started','Agent time','Speed-up','Tokens','Cost'],
+            [[r['profile'],r['run_id'],r['phases_attempted'],r['phases_delegated'],fmt_count(r['subagents_started']),fmt_time(r['wall_seconds_agent_calls']),faster(r),
+              fmt_count(r['reported_total_tokens']),fmt_cost(r['reported_total_cost_usd'])] for r in sub]))
     par=[r for r in rows if r['track']=='parallel']
     if par:
-        seq={}
-        for r in rows:
-            if r['track']=='sequential' and r['finished']:seq.setdefault(r['profile'],[]).append(r['wall_seconds_agent_calls'])
         def speedup(r):
             base=median(seq.get(r['profile'],[]))
             return f"{base/r['elapsed_seconds']:.2f}×" if base and r['finished'] and r['elapsed_seconds'] else '—'

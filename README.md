@@ -6,7 +6,7 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness is under active development. The sequential and parallel tracks are built; the subagent track is planned.
+> Status: the harness and all three tracks (sequential, parallel, subagents) are built. Full benchmark runs are still to come.
 
 Published results: [Evolution-Sim-Agent-Results](https://github.com/TimoWiesner/Evolution-Sim-Agent-Results).
 
@@ -70,7 +70,7 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
   eval/             hidden test results and logs per completed task
 ```
 
-`--track` is `sequential` (default) or `parallel`. `--run-id` defaults to `r1`; use another id to repeat a run.
+`--track` is `sequential` (default), `parallel` or `subagents`. `--run-id` defaults to `r1`; use another id to repeat a run.
 
 ## Commands
 
@@ -102,7 +102,8 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 | Track | How the 27 tasks are worked |
 |---|---|
 | `sequential` | One agent at a time, one task after the other. |
-| `parallel` | Up to N agents at the same time, each on a different task whose prerequisites are done. |
+| `parallel` | Up to N agents at the same time, each on a different task whose prerequisites are done. The harness does the splitting. |
+| `subagents` | One task after the other, as in `sequential`, but the agent may hand work to its CLI's own subagents. The model does the splitting. |
 
 ```bash
 python3 run.py run --profile claude-sonnet --track parallel [--workers 3]
@@ -122,6 +123,24 @@ Things to know when reading parallel results:
 - Checkouts do not share build output or installed project dependencies, so each task may repeat `./setup.sh`. All workers share one container, including its system packages.
 - Speed figures measured by the hidden suite during a run can be disturbed by agents working at the same time. Run `evaluate` once the run has finished for a clean final measurement.
 - With subscription logins, several agents share one rate limit.
+
+### Subagent track
+
+```bash
+python3 run.py run --profile claude-sonnet --track subagents
+```
+
+Everything is as in the sequential track except one paragraph in the phase prompt: delegation to subagents is allowed and encouraged where it helps, not required. Whether and how to delegate is the model's decision, and that decision is what the track measures. `compare` shows how many agent calls delegated work, how many subagents were started, and agent time against the sequential run of the same profile.
+
+What each CLI reports:
+
+| CLI | Delegation happened | Number of subagents | Subagent tokens and cost |
+|---|---|---|---|
+| Claude Code | yes | yes | included |
+| Codex | yes | not reported, shown as "—" | not verified |
+| opencode | yes (read from `task` tool calls, not yet tested live) | yes | not verified |
+
+Codex runs without `--ephemeral` in this track, because its subagents need a stored session.
 
 ## Layout
 

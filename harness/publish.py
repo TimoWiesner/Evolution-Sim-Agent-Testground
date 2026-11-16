@@ -163,6 +163,12 @@ def run_readme(report, artifact, release_url, harness_url):
                   ' / '.join(core.fmt_count(report['reported_' + k]) for k in core.TOKEN_KINDS)],
                  ['Cost', core.fmt_cost(report['reported_total_cost_usd'])],
                  ['Isolation', report['isolation']]]), '']
+    if report['track'] == 'subagents':
+        lines += ['## Delegation', '',
+                  'In this track the agent was allowed, but not required, to hand work to its CLI\'s own subagents.', '',
+                  core.table(['', ''], [
+                      ['Agent calls that delegated work', f'{report["phases_delegated"]} of {report["phases_attempted"]}'],
+                      ['Subagents started', core.fmt_count(report['subagents_started'])]]), '']
     if report['track'] == 'parallel':
         lines += ['## Parallel work', '',
                   f'Up to {report["workers"]} agents worked at the same time, each on its own task in a private checkout '

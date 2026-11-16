@@ -37,7 +37,7 @@ class RunnerTests(unittest.TestCase):
   u=usage('codex',json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_input_tokens':80,'output_tokens':7}}))
   self.assertEqual((u['input_tokens'],u['cached_input_tokens'],u['output_tokens'],u['tokens']),(20,80,7,107))
   out='\n'.join(json.dumps(x) for x in ({'type':'system','subtype':'init','model':'m-1'},{'type':'result','total_cost_usd':0.5,'usage':{'input_tokens':4,'output_tokens':6}}))
-  self.assertEqual(usage('claude',out),{'tokens':10,'input_tokens':4,'cached_input_tokens':0,'output_tokens':6,'cost_usd':0.5,'reported_model':'m-1'})
+  self.assertEqual(usage('claude',out),{'tokens':10,'input_tokens':4,'cached_input_tokens':0,'output_tokens':6,'cost_usd':0.5,'reported_model':'m-1','subagents':0,'delegated':False})
  def test_container_commands(self):
   from harness import core
   cfg=config();cfg['runs_root']='/tmp/evo-test-runs'
@@ -80,4 +80,26 @@ class RunnerTests(unittest.TestCase):
   self.assertEqual(test[test.index('--network')+1],'none')
   self.assertIn('/secret-eval:/eval:ro',test)
   self.assertEqual(test[test.index('--done')+1],'TASK-001,TASK-002')
+ def test_subagent_use_is_read_from_each_cli(self):
+  out=json.dumps({'type':'result','total_cost_usd':0.1,'usage':{'input_tokens':4,'output_tokens':248},
+   'modelUsage':{'m':{'inputTokens':6,'cacheCreationInputTokens':10,'cacheReadInputTokens':30,'outputTokens':297}},'subagent_stats':{'spawned':2}})
+  u=usage('claude',out)
+  self.assertEqual((u['input_tokens'],u['cached_input_tokens'],u['output_tokens'],u['subagents'],u['delegated']),(16,30,297,2,True))
+  turn=json.dumps({'type':'turn.completed','usage':{'input_tokens':2,'output_tokens':3}})
+  u=usage('codex',turn);self.assertEqual((u['subagents'],u['delegated']),(None,False))
+  u=usage('codex',json.dumps({'type':'item.completed','item':{'type':'collab_tool_call','tool':'wait'}})+'\n'+turn)
+  self.assertEqual((u['subagents'],u['delegated']),(None,True))
+  part=lambda i:json.dumps({'type':'tool','part':{'type':'tool','tool':'task','callID':i}})
+  u=usage('opencode',part('a')+'\n'+part('a')+'\n'+part('b'));self.assertEqual((u['subagents'],u['delegated']),(2,True))
+ def test_subagent_track_changes_only_prompt_and_codex_session(self):
+  from harness import core
+  cfg=config();cfg['runs_root']='/tmp/evo-test-runs'
+  for name in ('gpt-luna','claude-haiku'):
+   a=core.Run(name,cfg=cfg);b=core.Run(name,'subagents',cfg=cfg)
+   for r in (a,b):r.profile['executable']=sys.executable
+   x=core.phase_argv(a,'TASK-001','plan',1);y=core.phase_argv(b,'TASK-001','plan',1)
+   self.assertNotIn('DELEGATION:',x[-1]);self.assertIn('DELEGATION:',y[-1])
+   self.assertEqual(x[-1],y[-1].replace(core.DELEGATION_NOTE,'').replace('/subagents/','/sequential/'))
+   self.assertEqual([v for v in x[:-1] if v!='--ephemeral'],y[:-1])
+   self.assertEqual('--ephemeral' in x,name=='gpt-luna');self.assertNotIn('--ephemeral',y)
 if __name__=='__main__':unittest.main()
