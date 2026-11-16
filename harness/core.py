@@ -411,24 +411,132 @@ def rate_limited(cli, out):
         elif o.get('type') in ('error','turn.failed') and LIMIT_WORDS.search(json.dumps(o)):hit=True
     return {'resets_at':resets} if hit else None
 
-def note_rate_limit(state,task,phase,cycle,limit,label):
+AUTH_WORDS = re.compile(r'\b401\b|\b403\b|unauthori[sz]ed|authenticat|not logged in|/login|token (has )?expired|invalid api key',re.I)
+OUTAGE_WORDS = re.compile(r'connect|network|socket|timed? ?out|ECONN|ENOTFOUND|EAI_AGAIN|stream (disconnected|error|closed)|fetch failed|'
+                          r'overloaded|unavailable|bad gateway|internal server error|\b5\d\d\b',re.I)
+
+def did_work(cli, out, u):
+    """Did the model get to do anything in this call (produce output or use a tool)?"""
+    if u.get('output_tokens'):return True
+    return any((short_event(cli,line) or '').startswith(('tool','command started','file change')) for line in out.splitlines())
+
+def infra_failure(cli, r, u):
+    """Did this call fail for a reason outside the model: no connection, a provider outage, an expired
+    login or a local model server that went away? Returns None or {'kind','detail'}; kind is
+    'auth', 'server' or 'outage'."""
+    if r.get('aborted'):return {'kind':'server','detail':r['aborted']}
+    out=r['output'];found=None;events=[]
+    for line in out.splitlines():
+        try:o=json.loads(line)
+        except (ValueError,TypeError):continue
+        if isinstance(o,dict):events.append(o)
+    for i,o in enumerate(events):
+        text=json.dumps(o)
+        if cli=='claude':
+            if o.get('type')!='result' or o.get('terminal_reason')!='api_error':continue
+            status=o.get('api_error_status')
+            if status in (401,403) or (status is None and AUTH_WORDS.search(str(o.get('result')))):found={'kind':'auth','detail':f'API status {status}'}
+            # Other 4xx answers (bad request, prompt too long) would fail again and stay the model's result.
+            elif status is None or status>=500 or status in (408,409):found={'kind':'outage','detail':f'API status {status}'}
+        # An error the CLI recovered from is not an outage: only a failed turn or an error at the very end counts.
+        elif o.get('type')=='turn.failed' or (o.get('type')=='error' and i>=len(events)-3):
+            if AUTH_WORDS.search(text):found={'kind':'auth','detail':text[:300]}
+            elif OUTAGE_WORDS.search(text):found=found or {'kind':'outage','detail':text[:300]}
+    if found:return found
+    # Whatever the CLI printed: a call in which the model never produced anything was not answered.
+    if not did_work(cli,out,u):return {'kind':'outage','detail':'the call ended without any model output'}
+    return None
+
+def ports_down(profile):
+    """Loopback ports of local model servers (profile `host_ports`) that do not accept connections."""
+    import socket
+    down=[]
+    for port in profile.get('host_ports') or []:
+        try:socket.create_connection(('127.0.0.1',int(port)),2).close()
+        except OSError:down.append(int(port))
+    return down
+
+def server_watch(profile):
+    """A check for `cmd` that reports a local model server which stays unreachable (three checks, 30 s apart)."""
+    if not profile.get('host_ports'):return None
+    misses=[0]
+    def check():
+        down=ports_down(profile);misses[0]=misses[0]+1 if down else 0
+        return f'local model server on port {down[0]} stopped answering' if misses[0]>=3 else None
+    return check
+
+def halt(state,message):
+    """End the run in an orderly way; starting the same command again continues it."""
+    state['halt']=message;print('STOPPING:',message,flush=True)
+
+def clear_streaks(state):
+    for k in ('limit_streak','infra_streak','auth_refreshed'):state.pop(k,None)
+
+def uncounted(state,r,u):
+    """Time and tokens of calls that are repeated; reported, but not part of the run's figures."""
+    t=state.setdefault('uncounted',{'calls':0,'seconds':0,'tokens':0})
+    t['calls']+=1;t['seconds']=round(t['seconds']+r['seconds'],2);t['tokens']+=u.get('tokens') or 0
+
+def note_rate_limit(state,cfg,task,phase,cycle,limit,label,r=None,u=None):
     """A refused call is not the model's failure: it is not an event, costs no retry and pauses the run."""
     until=limit['resets_at'] or time.time()+900
     state.setdefault('rate_limits',[]).append({'task':task,'phase':phase,'cycle':cycle,'resets_at':limit['resets_at'],'timestamp':now()})
-    state['paused_until']=max(state.get('paused_until') or 0,until)
+    if r:uncounted(state,r,u or {})
+    state['paused_until']=max(state.get('paused_until') or 0,until);state['pause_reason']='limit'
+    state['limit_streak']=state.get('limit_streak',0)+1
     print(f'RATE LIMIT {label}: the provider refused the call; the phase will be repeated',flush=True)
+    most=cfg.get('max_refusals_in_a_row',6)
+    if state['limit_streak']>most:halt(state,f'the provider refused {state["limit_streak"]} calls in a row without one completed phase; check the account, then start the same command again.')
+
+def note_infra(run,state,task,phase,cycle,info,label,r=None,u=None):
+    """An outage is not the model's failure either: no event, no retry used; the phase is repeated
+    after a growing wait, and the run ends cleanly when the problem does not go away."""
+    cfg=run.cfg;waits=cfg.get('infra_retry_waits_seconds',[60,300,900,1800])
+    state.setdefault('infra_failures',[]).append({'task':task,'phase':phase,'cycle':cycle,'kind':info['kind'],'detail':info['detail'],
+                                                  'seconds':r['seconds'] if r else 0,'timestamp':now()})
+    if r:uncounted(state,r,u or {})
+    print(f'INFRASTRUCTURE {label}: {info["kind"]} ({info["detail"][:160]}); not counted, the phase will be repeated',flush=True)
+    if info['kind']=='auth':
+        if run.container and not state.get('auth_refreshed'):
+            copy_logins(run,True);state['auth_refreshed']=True
+            print('Copied the CLI login from the host again.',flush=True);return
+        return halt(state,f'the {run.cli} login is not accepted. Log in with the CLI on this machine, then start the same command again with --refresh-login.')
+    n=state['infra_streak']=state.get('infra_streak',0)+1
+    if n>len(waits):
+        what='the local model server is not reachable' if info['kind']=='server' else 'the provider could not be reached'
+        return halt(state,f'{what} after {n} attempts. Start the same command again when it is back.')
+    state['paused_until']=max(state.get('paused_until') or 0,time.time()+waits[n-1])
+    state.setdefault('pause_reason','infra')
 
 def wait_for_limit(state,cfg,stop_on_limit=False):
-    """Sleep until the provider's limit resets. Returns False when the run should end instead."""
+    """Sleep until the provider's limit resets or an outage wait is over. Returns False when the run should end instead."""
     until=state.get('paused_until')
     if not until:return True
-    wait=max(until-time.time(),0)+60;when=dt.datetime.fromtimestamp(until).strftime('%Y-%m-%d %H:%M')
-    if stop_on_limit or wait>cfg.get('max_limit_wait_seconds',21600):
+    infra=state.get('pause_reason')=='infra'
+    wait=max(until-time.time(),0)+(0 if infra else 60);when=dt.datetime.fromtimestamp(until).strftime('%Y-%m-%d %H:%M')
+    if infra:print(f'Trying again in {fmt_time(wait)}. Ctrl+C stops the run; it can be resumed.',flush=True)
+    elif stop_on_limit or wait>cfg.get('max_limit_wait_seconds',21600):
         print(f'Provider limit reached; it resets around {when}. Start the same command again after that.',flush=True);return False
-    print(f'Provider limit reached; waiting until about {when} ({fmt_time(wait)}). Ctrl+C stops the run; it can be resumed.',flush=True)
+    else:print(f'Provider limit reached; waiting until about {when} ({fmt_time(wait)}). Ctrl+C stops the run; it can be resumed.',flush=True)
     time.sleep(wait)
-    state['paused_until']=None;state['rate_limit_wait_seconds']=round(state.get('rate_limit_wait_seconds',0)+wait)
+    key='infra_wait_seconds' if infra else 'rate_limit_wait_seconds'
+    state['paused_until']=None;state.pop('pause_reason',None);state[key]=round(state.get(key,0)+wait)
     return True
+
+def refused(run,state,task,phase,cycle,label,r,hand_ok):
+    """Was this call stopped by a limit or an outage? Then it is noted and repeated, not judged."""
+    if hand_ok and r['exit_code']==0:return False
+    u=usage(run.cli,r['output'])
+    limit=rate_limited(run.cli,r['output'])
+    if limit:note_rate_limit(state,run.cfg,task,phase,cycle,limit,label,r,u);return True
+    info=infra_failure(run.cli,r,u)
+    if info:note_infra(run,state,task,phase,cycle,info,label,r,u);return True
+    return False
+
+def begin_invocation(state):
+    """A fresh start of `run`: the operator has looked at it, so earlier stops and outage waits are over."""
+    state.pop('halt',None);clear_streaks(state)
+    if state.get('pause_reason')=='infra':state['paused_until']=None;state.pop('pause_reason',None)
 
 def short_event(cli, line):
     try:o=json.loads(line)
@@ -468,8 +576,9 @@ STOP = threading.Event()   # set to end every running agent process (parallel tr
 class Interrupted(Exception):
     pass
 
-def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=None,prefix=''):
-    start=time.monotonic();out=[];timed_out=False
+def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=None,prefix='',watch=None):
+    """`watch` is called every 30 s; when it returns a text, the process is ended and the text is the reason."""
+    start=time.monotonic();out=[];timed_out=False;aborted=None;checked=start
     if logfile:
         logfile=pathlib.Path(logfile);logfile.parent.mkdir(parents=True,exist_ok=True)
     proc=subprocess.Popen(argv,cwd=str(cwd),stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1,start_new_session=True,env={**os.environ,**env} if env else None)
@@ -485,8 +594,10 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
     last_event=None
     with open(logfile,'w',encoding='utf-8') if logfile else open(os.devnull,'w') as log:
         while True:
-            if time.monotonic()-start>timeout or STOP.is_set():
-                timed_out=True
+            if watch and time.monotonic()-checked>=30:
+                checked=time.monotonic();aborted=watch()
+            if time.monotonic()-start>timeout or STOP.is_set() or aborted:
+                timed_out=not aborted
                 try:os.killpg(proc.pid,signal.SIGTERM)
                 except ProcessLookupError:pass
                 try:proc.wait(timeout=3)
@@ -508,7 +619,7 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
         proc.wait()
         proc.stdout.close()
     if STOP.is_set():raise Interrupted()
-    return {'exit_code':124 if timed_out else proc.returncode,'seconds':round(time.monotonic()-start,2),'output':''.join(out),'timeout':timed_out}
+    return {'exit_code':124 if timed_out else (1 if aborted else proc.returncode),'seconds':round(time.monotonic()-start,2),'output':''.join(out),'timeout':timed_out,'aborted':aborted}
 
 # --- phases ------------------------------------------------------------------
 
@@ -613,13 +724,16 @@ def agent_call(run,task,phase,cycle,label,unsafe=False,live=True,files=()):
     """Run one fresh agent process for a phase and return the result of `cmd`."""
     b=run.base;w=run.place(task,phase)[0];limit=run.profile['phase_timeout_seconds']
     argv=phase_argv(run,task,phase,cycle,unsafe,files)
-    prefix=f'[{task}] ' if run.track=='parallel' else ''
+    prefix=f'[{task}] ' if run.track=='parallel' else '';watch=server_watch(run.profile)
     if run.container:
         # The in-container `timeout` enforces the limit (exit 124); the outer limit is only a backstop.
-        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,prefix=prefix)
+        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,prefix=prefix,watch=watch)
         if r['exit_code']==124:r['timeout']=True
+        if r['aborted']:
+            # Ending `podman exec` does not end the agent inside the container.
+            subprocess.run([runtime(run.cfg),'exec',container_name(run),'pkill','-KILL','-f',f'WORKSPACE ROOT \\(absolute\\): {run.place(task,phase)[1]}\\b'],capture_output=True)
     else:
-        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=run.profile.get('env'),prefix=prefix)
+        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=run.profile.get('env'),prefix=prefix,watch=watch)
     return r
 
 def inflight_path(run,task):
@@ -659,12 +773,16 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     archive_handoff(run,hand,label)
     # checkpoint before any agent process, survives power loss
     write(inflight_path(run,task),{'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'started':now()})
+    down=ports_down(run.profile)
+    if down:
+        with lock:note_infra(run,state,task,phase,cycle,{'kind':'server','detail':f'nothing answers on local port {down[0]}'},label)
+        return False
     print(f'START {label} (cwd={w})',flush=True)
     r=agent_call(run,task,phase,cycle,label,unsafe,live)
     with lock:
         hand_ok,reason=handoff_valid(hand,task,phase,cycle)
-        limit=None if hand_ok and r['exit_code']==0 else rate_limited(run.cli,r['output'])
-        if limit:note_rate_limit(state,task,phase,cycle,limit,label);return True
+        if refused(run,state,task,phase,cycle,label,r,hand_ok):return False
+        clear_streaks(state)
         intact,integrity_error=protected_ok(w)
         if not intact:reason='Protected benchmark spec modified: '+integrity_error
         chk=external_checks(w,task,phase,cfg['benchmark_test_timeout_seconds']) if hand_ok and intact and r['exit_code']==0 else {'exit_code':1,'output':'not run'}
@@ -752,8 +870,8 @@ def execute_merge(run,state,task,unsafe=False,live=True,lock=None):
     with lock:
         if files:
             hand_ok,reason=handoff_valid(hand,task,'merge',cycle)
-            limit=None if hand_ok and r['exit_code']==0 else rate_limited(run.cli,r['output'])
-            if limit:note_rate_limit(state,task,'merge',cycle,limit,label);reset_main(w,before);return True
+            if refused(run,state,task,'merge',cycle,label,r,hand_ok):reset_main(w,before);return False
+            clear_streaks(state)
             intact,integrity_error=protected_ok(w)
             if not intact:reason='Protected benchmark spec modified: '+integrity_error
             left=conflict_markers(w,files) if hand_ok and intact else []
@@ -809,7 +927,7 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,
     from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
     cfg=run.cfg;lock=threading.Lock();running={};n=0
     began=time.monotonic();earlier=state.get('elapsed_seconds',0);state.setdefault('merges',[])
-    STOP.clear();reset_main(run.workspace)
+    STOP.clear();reset_main(run.workspace);begin_invocation(state)
     for f in run.base.glob('inflight-*.json'):
         print('WARNING: prior interrupted phase:',read(f));f.unlink()
     def job(task):
@@ -826,7 +944,7 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,
     try:
         while True:
             with lock:
-                stop=budget_reached(state,cfg)
+                stop=budget_reached(state,cfg) or state.get('halt')
                 free=run.workers-len(running)
                 if max_phases is not None:free=min(free,max_phases-n)
                 paused=bool(state.get('paused_until'))
@@ -839,7 +957,7 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,
                     t0=time.monotonic();go_on=wait_for_limit(state,cfg,stop_on_limit);began+=time.monotonic()-t0
                     write(run.state,state)
                     if go_on:continue
-                if stop:print(stop)
+                if stop and not state.get('halt'):print(stop)
                 break
             for f in wait(running,return_when=FIRST_COMPLETED)[0]:
                 task=running.pop(f);f.result()
@@ -890,6 +1008,10 @@ def summarize(meta,state):
               'merge_agent_seconds':round(sum(e.get('seconds',0) for e in events if e.get('phase')=='merge'),2),
               # Delegation to the CLI's own subagents; a count of None means the CLI does not report one.
               'rate_limit_hits':len(state.get('rate_limits',[])),'rate_limit_wait_seconds':state.get('rate_limit_wait_seconds',0),
+              # Outages (connection, provider, login, local model server): repeated calls, never the model's failure.
+              'infra_failures':len(state.get('infra_failures',[])),'infra_wait_seconds':state.get('infra_wait_seconds',0),
+              'uncounted_calls':state.get('uncounted',{}).get('calls',0),'uncounted_seconds':state.get('uncounted',{}).get('seconds',0),
+              'uncounted_tokens':state.get('uncounted',{}).get('tokens',0),
               'phases_delegated':sum(bool(e['usage'].get('delegated')) for e in events),
               'subagents_started':None if any(e['usage'].get('subagents') is None for e in events) else sum(e['usage']['subagents'] for e in events)}
     return {**parallel,'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
@@ -1077,6 +1199,7 @@ def comparison_markdown(rows):
     if any(r['evaluations_failed'] for r in rows):notes.append('Some evaluations could not be completed; see the run folders.')
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
     if any(r.get('rate_limit_hits') for r in rows):notes.append('Some runs were paused by a provider usage limit; refused calls are repeated and not counted as failures or agent time.')
+    if any(r.get('infra_failures') for r in rows):notes.append('Some runs met outages (connection, provider, login or local model server); those calls are repeated and not counted as failures or agent time.')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
     if notes:out+=['','## Notes','']+['- '+n for n in notes]
     return '\n'.join(out)+'\n'
@@ -1186,22 +1309,23 @@ def main():
         if (b/'inflight.json').exists():
             print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
             (b/'inflight.json').unlink()
-        st=read(run.state);n=0;n_warned=[]
+        st=read(run.state);n=0;n_warned=[];begin_invocation(st)
         while True:
             if a.max_phases is not None and n>=a.max_phases:break
             stop=budget_reached(st,cfg)
             if stop:print(stop);break
             task=choose_ready(st)
             if not task:break
-            try:execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
+            try:counted=execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
             except BaseException:
                 if run.container:stop_container(run)
                 raise
-            write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=1
+            write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=bool(counted)
+            if st.get('halt'):break
             if st.get('paused_until'):
-                n-=1;go_on=wait_for_limit(st,cfg,a.stop_on_limit);write(run.state,st)
+                go_on=wait_for_limit(st,cfg,a.stop_on_limit);write(run.state,st)
                 if not go_on:break
-                continue
+            if not counted:continue
             if st['tasks'][task]['status']=='DONE' and not a.no_eval:
                 if evaluate_run(run,st,task) is None and not n_warned:
                     print('NOTE: hidden evaluation skipped, evaluation repository not found');n_warned.append(1)

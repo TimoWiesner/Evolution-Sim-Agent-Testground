@@ -24,6 +24,8 @@ if match:
   elif os.getenv('FAKE_CONFLICT')=='1' and phase=='implement':state.write_text(task+'\\n')
   else:state.write_text(state.read_text() if os.getenv('FAKE_CONFLICT')=='1' else 'updated\\n')
   if phase=='implement':(pathlib.Path.cwd()/(task+'.txt')).write_text(task)
+if os.getenv('FAKE_OUTAGE')=='1':print(json.dumps({'type':'error','error':{'message':'fetch failed: ECONNREFUSED'}}),flush=True);sys.exit(1)
+if os.getenv('FAKE_AUTH')=='1':print(json.dumps({'type':'error','error':{'message':'401 Unauthorized'}}),flush=True);sys.exit(1)
 if os.getenv('FAKE_LIMIT')=='1':print(json.dumps({'type':'error','error':{'message':'429 Too Many Requests: usage limit reached'}}),flush=True);sys.exit(1)
 print(json.dumps({'type':'step_finish','part':{'tokens':{'input':10,'output':5},'cost':0.01}}),flush=True)
 '''
@@ -80,6 +82,44 @@ class Integration(Base):
   out=json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','resetsAt':123}})
   self.assertEqual(core.rate_limited('claude',out),{'resets_at':123})
   self.assertIsNone(core.rate_limited('claude',out.replace('rejected','allowed_warning')))
+ def test_outage_is_repeated_then_stops_the_run(self):
+  with patch.dict(os.environ,{'FAKE_OUTAGE':'1','FAKE_MISSING':'1'}):
+   for i in range(4):
+    self.assertFalse(self.phase());self.assertEqual(self.s['pause_reason'],'infra');self.assertNotIn('halt',self.s)
+    with patch.object(core.time,'sleep'):self.assertTrue(core.wait_for_limit(self.s,self.run_.cfg,stop_on_limit=True))
+   self.assertFalse(self.phase())
+  t=self.s['tasks']['TASK-001']
+  self.assertEqual((t['status'],t['recovery'],self.s['events']),('PENDING',0,[]))
+  self.assertEqual(len(self.s['infra_failures']),5);self.assertIn('halt',self.s)
+  self.assertEqual(self.s['uncounted']['calls'],5)
+  core.begin_invocation(self.s);self.assertNotIn('halt',self.s)
+  self.assertTrue(self.phase());self.assertEqual(t['phase'],'implement');self.assertNotIn('infra_streak',self.s)
+  self.assertEqual(core.summarize(core.read(self.run_.meta),self.s)['infra_failures'],5)
+ def test_rejected_login_stops_the_run(self):
+  with patch.dict(os.environ,{'FAKE_AUTH':'1','FAKE_MISSING':'1'}):self.assertFalse(self.phase())
+  self.assertIn('login',self.s['halt']);self.assertEqual(self.s['events'],[])
+ def test_dead_local_server_is_noticed_before_the_call(self):
+  import socket
+  with socket.socket() as sock:
+   sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.listen()
+   self.assertEqual(core.ports_down({'host_ports':[port]}),[])
+  self.run_.profile['host_ports']=[port]
+  self.assertFalse(self.phase())
+  self.assertEqual(self.s['infra_failures'][0]['kind'],'server');self.assertFalse((self.run_.base/'logs').exists())
+ def test_outage_detection(self):
+  r=lambda *events,**k:{'output':'\n'.join(json.dumps(e) for e in events),'aborted':None,**k}
+  worked={'output_tokens':9};silent={'output_tokens':None}
+  dead={'type':'result','terminal_reason':'api_error','api_error_status':None,'result':'Connection error'}
+  self.assertEqual(core.infra_failure('claude',r(dead),silent)['kind'],'outage')
+  self.assertEqual(core.infra_failure('claude',r({**dead,'api_error_status':529}),worked)['kind'],'outage')
+  self.assertEqual(core.infra_failure('claude',r({**dead,'api_error_status':401}),worked)['kind'],'auth')
+  self.assertIsNone(core.infra_failure('claude',r({**dead,'api_error_status':400}),worked))
+  self.assertIsNone(core.infra_failure('claude',r({'type':'result','terminal_reason':'completed'}),worked))
+  self.assertEqual(core.infra_failure('claude',r({'type':'result'}),silent)['kind'],'outage')
+  early={'type':'error','message':'stream disconnected, retrying'};step={'type':'item.completed','item':{'type':'agent_message'}}
+  self.assertIsNone(core.infra_failure('codex',r(early,step,step,step),worked))
+  self.assertEqual(core.infra_failure('codex',r(step,early),worked)['kind'],'outage')
+  self.assertEqual(core.infra_failure('opencode',{'output':'','aborted':'server gone'},worked)['kind'],'server')
  def test_generated_handoff_is_not_protected(self):
   hand=self.w/'tasks/TASK-001/handoffs/plan-cycle1.md'
   hand.parent.mkdir(exist_ok=True);hand.write_text('notes')

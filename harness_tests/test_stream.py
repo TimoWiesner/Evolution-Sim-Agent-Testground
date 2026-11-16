@@ -13,5 +13,13 @@ class StreamTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    r=cmd([sys.executable,'-c','import time;time.sleep(3)'],tmp,.25)
    self.assertEqual(r['exit_code'],124)
+ def test_watch_ends_the_process(self):
+  from unittest.mock import patch
+  import harness.core as core
+  with tempfile.TemporaryDirectory() as tmp:
+   clock=iter(range(0,100000,20))
+   with patch.object(core.time,'monotonic',lambda:next(clock)):
+    r=cmd([sys.executable,'-c','import time;time.sleep(30)'],tmp,10**6,watch=lambda:'server gone')
+   self.assertEqual((r['aborted'],r['timeout'],r['exit_code']),('server gone',False,1))
 
 if __name__=='__main__':unittest.main()

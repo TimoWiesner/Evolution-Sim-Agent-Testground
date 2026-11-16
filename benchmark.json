@@ -5,6 +5,8 @@
   "recovery_attempts": 1,
   "max_run_seconds": 172800,
   "max_limit_wait_seconds": 21600,
+  "max_refusals_in_a_row": 6,
+  "infra_retry_waits_seconds": [60, 300, 900, 1800],
   "max_cost_usd": null,
   "max_tokens": null,
   "benchmark_test_timeout_seconds": 180,
