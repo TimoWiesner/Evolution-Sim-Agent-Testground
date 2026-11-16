@@ -19,6 +19,9 @@
     "path": "../Evolution-Sim-Agent-Eval",
     "timeout_seconds": 3600
   },
+  "results": {
+    "path": "../Evolution-Sim-Agent-Results"
+  },
   "clis": {
     "claude": { "executable": "claude" },
     "codex": { "executable": "codex" },

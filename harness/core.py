@@ -675,6 +675,7 @@ def fmt_time(v):
     m,s=divmod(int(round(v)),60);h,m=divmod(m,60)
     return f'{h}h {m:02d}m' if h else f'{m}m {s:02d}s'
 
+def label(category):return 'UI' if category=='ui' else category.capitalize()
 def fmt_cost(v):return '—' if v is None else f'${v:.2f}'
 def fmt_pct(v):return '—' if v is None else f'{v*100:.0f}%'
 
@@ -705,7 +706,7 @@ def comparison_markdown(rows):
         cats=list(scored[0]['evaluation']['categories'])
         out+=['','## Hidden test results','','Checks passed out of all checks in the suite, from the latest evaluation of each run. '
               'Checks belonging to tasks that are not done yet count as not passed. Speed is measured by the suite at about 2,000 individuals.','']
-        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[c.capitalize() for c in cats]+['Ticks/s'],
+        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[label(c) for c in cats]+['Ticks/s'],
             [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
              +[r['evaluation']['metrics'].get('ticks_per_second','—')] for r in scored]))
@@ -721,7 +722,7 @@ def comparison_markdown(rows):
     if len({r['benchmark_version'] for r in rows})>1:notes.append('Runs used different benchmark versions and are not directly comparable.')
     if len({json.dumps(r['host'],sort_keys=True) for r in rows})>1:notes.append('Runs were made on different hosts; times are not directly comparable.')
     if len({r['isolation'] for r in rows})>1:notes.append('Runs mix container and host isolation; the environments differ.')
-    if len({(r['evaluation']['eval_version'],r['evaluation']['eval_commit']) for r in rows if r['evaluation']})>1:notes.append('Runs were scored with different versions of the hidden suite; re-run `evaluate` before comparing test results.')
+    if len({(r['evaluation'].get('eval_version'),r['evaluation'].get('eval_commit')) for r in rows if r['evaluation']})>1:notes.append('Runs were scored with different versions of the hidden suite; re-run `evaluate` before comparing test results.')
     if any(r['evaluations_failed'] for r in rows):notes.append('Some evaluations could not be completed; see the run folders.')
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
@@ -763,10 +764,11 @@ def main():
     cfg=config()
     p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
-    for name in ('doctor','build-image','compare','init','run','evaluate','report','unblock'):
+    for name in ('doctor','build-image','compare','publish','init','run','evaluate','package','report','unblock'):
         q=sub.add_parser(name)
         if name=='compare':q.add_argument('--out',help='folder for comparison.md and comparison.json (default: runs root)')
-        if name not in ('doctor','build-image','compare'):
+        if name=='publish':q.add_argument('--dry-run',action='store_true',help='show the git and gh commands without running them')
+        if name not in ('doctor','build-image','compare','publish'):
             q.add_argument('--profile',choices=sorted(cfg['profiles']),required=True,help='named CLI + model combination from benchmark.json')
             q.add_argument('--track',choices=TRACKS,default='sequential')
             q.add_argument('--run-id',default='r1',help='distinguishes repeated runs of the same profile and track')
@@ -781,6 +783,9 @@ def main():
     if a.action=='doctor':doctor(cfg);return
     if a.action=='build-image':sys.exit(build_image(cfg))
     if a.action=='compare':compare(cfg,a.out);return
+    if a.action=='publish':
+        from . import publish as pub
+        pub.publish(cfg,a.dry_run);return
     run=Run(a.profile,a.track,a.run_id,cfg,container=not getattr(a,'no_container',False))
     if a.action=='run' and a.dry_run:
         st=read(run.state) if run.state.exists() else initial_state()
@@ -791,6 +796,10 @@ def main():
         return
     if a.action=='init':print('Workspace:',init(run));return
     if a.action=='report':report(run);return
+    if a.action=='package':
+        from . import publish as pub
+        with lock_run(run):pub.package(run)
+        return
     if a.action=='evaluate':
         if not eval_dir(cfg):p.error('evaluation repository not found (see "eval" in benchmark.json)')
         with lock_run(run):

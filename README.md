@@ -6,7 +6,9 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness is under active development. Packaging of results and the parallel tracks are planned but not built yet.
+> Status: the harness is under active development. The parallel and subagent tracks are planned but not built yet.
+
+Published results: [Evolution-Sim-Agent-Results](https://github.com/TimoWiesner/Evolution-Sim-Agent-Results).
 
 ## Quick start (Ubuntu)
 
@@ -78,6 +80,8 @@ python3 run.py run     --profile local-qwen [--run-id r2] [--max-phases N] [--qu
 python3 run.py report  --profile local-qwen
 python3 run.py evaluate --profile local-qwen           # score the current state again
 python3 run.py compare [--out DIR]
+python3 run.py package --profile local-qwen           # build and write the run into the results repository
+python3 run.py publish [--dry-run]                    # push the results repository, upload executables
 python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --cycle 1
 ```
 
@@ -95,7 +99,8 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 - `tasks/TASK-*/task.md` and `task.json`: task specifications.
 - `skills/{plan,implement,review}/SKILL.md`: phase instructions copied into each workspace.
 - `starter/`: initial project files, `AGENTS.md`, `CLAUDE.md` and the interface contract `docs/CONTRACT.md`.
-- `harness/core.py`: runner and CLI adapters.
+- `harness/core.py`: runner, CLI adapters, container isolation, evaluation and comparison.
+- `harness/publish.py`: packaging and publishing of finished runs.
 - `harness_tests/`: unit tests and an end-to-end test with a fake agent.
 - `acceptance/`: operator-owned baseline checks.
 - `container/Containerfile`: the agent sandbox image (Ubuntu 24.04, Python, Rust, Node, build tools).
@@ -134,6 +139,21 @@ Product quality is scored by a black-box suite kept in a separate private reposi
 - Results are reported as passed/total per category. There is no weighted total, so a strong category cannot hide a broken one.
 
 Without the private repository (`eval.path` in `benchmark.json`) the harness still works; runs are simply not scored. The usability of the UI is judged by hand with the rubric in `acceptance/MANUAL_REVIEW.md`.
+
+## Publishing results
+
+Results live in a separate public repository (`results.path` in `benchmark.json`), so this one stays a pure harness.
+
+`package` takes the final committed state of a run and:
+
+1. checks that the source does not contain the run's CLI login token, and refuses if it does;
+2. runs `./setup.sh` and `./build.sh` in a fresh container;
+3. tests whether `dist/` really is self-contained, by running it on a bare Ubuntu 24.04 with no runtimes and no network;
+4. writes `results/<profile>/<track>/<run-id>/` with a readable summary, `report.json`, `source.zip` and `artifact.json`, and regenerates the results index.
+
+`publish` commits and pushes the results repository and uploads each executable as a GitHub Release asset (needs the GitHub CLI `gh`). Nothing is pushed until you run it; `--dry-run` shows the commands.
+
+Published are figures, the source the agent wrote, and hidden-test totals per category. Raw CLI logs, the container home and individual check results never leave the run folder.
 
 ## Safety
 
