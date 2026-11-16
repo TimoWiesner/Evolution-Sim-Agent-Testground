@@ -3,10 +3,11 @@
 You are implementing Evolution Simulation, a locally runnable grid-world ecological evolution game. Read `docs/PROJECT.md`, `docs/CONTRACT.md`, `docs/STATE.md`, `docs/ARCHITECTURE.md`, task spec in `tasks/`, relevant `docs/decisions/`, then the *current* phase skill in `.agents/skills/{plan,implement,review}/SKILL.md`.
 
 ## Scope and hard rules
-- Follow task scope, prerequisites, acceptance criteria and three-phase workflow; never silently skip behavior.
+- Follow the task's goal, its "Must have" points (the acceptance criteria) and the three-phase workflow; never silently skip behavior.
 - The phase instruction includes the exact task and handoff file paths. Work only on the current phase. Don't pick unrelated tasks or transition phases yourself.
 - Each phase runs in a newly started process with no conversation history. Persist decisions, assumptions, test evidence, follow-up steps and blockers in task-local phase documents. Read them on entry.
-- Core simulation language **Python or Rust**. Choose language/framework, spatial lookup algorithm and DNA representation through written ADRs; do not preempt agent freedom. Native desktop or local web UI allowed.
+- The technology is your choice: any language or framework that runs in the benchmark container (Python 3, Rust and Node are installed). Choose it, the spatial lookup algorithm and the DNA representation through written ADRs. Native desktop or local web UI allowed.
+- Each task lists "Your decisions" and what is "Not part of this task". UI tasks also have a "Design freedom" section: the visual design is yours and cannot fail a task.
 - Grid movement is cell-to-cell; left/right and top/bottom wrap; climate must remain continuous across wrapping boundaries. Plants have DNA, mutation and speciation; herbivores/carnivores have sexual reproduction and heritable behavioral tendencies. Extinctions are allowed.
 - Deterministic or seed-based simulation; minor inter-platform differences allowed. UI and headless modes share the same engine. No arbitrary hardcoded population replenishment.
 - Add tests, run them, report exact command and result; don't fabricate success.

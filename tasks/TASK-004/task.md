@@ -1,15 +1,26 @@
 # TASK-004: Grid coordinates and toroidal topology
 
-## Dependencies
+## Depends on
 TASK-002
 
-## Concrete implementation scope
-Implement cell positions, neighbor distances and wrap-aware routing.
+## Goal
+Provide the geometry of the world: a rectangular grid whose left/right and top/bottom edges are joined.
 
-## Acceptance criteria
-- Border tests for all four edges
-- negative and multiwrap coordinates
-- rectangular maps.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- Any integer coordinate is mapped to a valid cell, including negative values and values several world widths away.
+- Distance and direction between two cells use the shortest way, across an edge where that is shorter, on both axes.
+- The cells within a given radius of a cell can be listed without duplicates, also when the radius is larger than the world.
+- Non-square worlds and very small worlds (1×1, 1×N) work.
+- Tests cover all four edges, the corners, negative and multiply wrapped coordinates and a 1×1 world.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- The distance measure (for example Chebyshev, Manhattan or Euclidean); document it and use it everywhere.
+- The data types for positions and directions.
+
+## Not part of this task
+- Organisms and the spatial index (TASK-010).
+- Climate.

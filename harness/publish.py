@@ -9,6 +9,7 @@ hidden-test results only as category totals.
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import tarfile
@@ -89,13 +90,41 @@ def leaked_secrets(tree, secrets):
 
 # --- build and self-containment --------------------------------------------------
 
-def build_product(cfg, product, log):
-    """Run ./setup.sh and ./build.sh in a fresh benchmark container. True on success."""
+SCREENSHOT_SECONDS = 180          # the contract allows the product 120 s
+MAX_SCREENSHOTS = 6               # main.png plus five more, as in the contract
+MAX_SCREENSHOT_BYTES = 8 << 20
+
+
+def build_product(cfg, product, log, shots):
+    """Run ./setup.sh and ./build.sh in a fresh benchmark container, then let the product write
+    its screenshots into `shots`. True if the build succeeded; screenshots are optional."""
+    script = (f'cd {core.CONTAINER_WS} && ./setup.sh && ./build.sh; rc=$?; '
+              f'if [ $rc -eq 0 ]; then timeout {SCREENSHOT_SECONDS} xvfb-run -a -s "-screen 0 1920x1080x24" '
+              './evosim ui --screenshots /shots; echo "screenshots exit status: $?"; fi; exit $rc')
     argv = [core.runtime(cfg), 'run', '--rm', '--network', 'pasta:--map-guest-addr,none',
-            '-v', f'{product}:{core.CONTAINER_WS}', cfg['container']['image'],
-            'bash', '-c', f'cd {core.CONTAINER_WS} && ./setup.sh && ./build.sh']
-    r = core.cmd(argv, product, cfg['eval']['timeout_seconds'], logfile=log)
+            '-v', f'{product}:{core.CONTAINER_WS}', '-v', f'{shots}:/shots', cfg['container']['image'],
+            'bash', '-c', script]
+    r = core.cmd(argv, product, cfg['eval']['timeout_seconds'] + SCREENSHOT_SECONDS, logfile=log)
     return r['exit_code'] == 0 and (product / 'dist' / 'evosim').is_file()
+
+
+def collect_screenshots(shots, dest):
+    """Copy the product's PNG files into `dest` (main.png first) and return their names.
+    Only real PNG files of a sane size are taken; names are reduced to safe characters."""
+    shutil.rmtree(dest, ignore_errors=True)
+    files = sorted((f for f in pathlib.Path(shots).glob('*.png') if f.is_file() and not f.is_symlink()),
+                   key=lambda f: (f.name != 'main.png', f.name))
+    names = []
+    for f in files:
+        name = re.sub(r'[^a-z0-9._-]', '-', f.name.lower())
+        if len(names) >= MAX_SCREENSHOTS or name in names or not 0 < f.stat().st_size <= MAX_SCREENSHOT_BYTES:
+            continue
+        with open(f, 'rb') as h:
+            if h.read(8) != b'\x89PNG\r\n\x1a\n':
+                continue
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, dest / name); names.append(name)
+    return names
 
 
 def self_contained(cfg, dist):
@@ -194,6 +223,14 @@ def run_readme(report, artifact, release_url, harness_url):
                                  [[e['label'], e.get('done_tasks', '—'), e['passed'], e['due']] for e in report['evaluations']]), '']
     else:
         lines += ['This run was not scored.', '']
+    shots = artifact.get('screenshots') or []
+    lines += ['## User interface', '']
+    if shots:
+        lines += ['Screenshots written by the product itself (`./evosim ui --screenshots`). The tasks fix what the '
+                  'interface must be able to do; its design was the agent\'s own choice.', '']
+        lines += [f'![{pathlib.PurePath(s).stem}](screenshots/{s})\n' for s in shots]
+    else:
+        lines += ['The product wrote no screenshots.', '']
     lines += ['## Download', '']
     if artifact['build_ok']:
         note = ('It is self-contained: it ran on a bare Ubuntu 24.04 with no runtimes installed.' if artifact['self_contained']
@@ -223,6 +260,12 @@ def index_readme(reports, harness_url, repo_url):
         folder = f'results/{r["profile"]}/{r["track"]}/{r["run_id"]}'
         link = f' · [executable]({repo_url}/releases/tag/{r["profile"]}-{r["track"]}-{r["run_id"]})' if repo_url and r.get('has_asset') else ''
         lines.append(f'- [{r["profile"]} · {r["track"]} · {r["run_id"]}]({folder}/README.md){link}')
+    shown = [r for r in reports if r.get('screenshot')]
+    if shown:
+        lines += ['', '## Interfaces', '', 'The main view of each product, as designed by the agent.', '']
+        for r in shown:
+            folder = f'results/{r["profile"]}/{r["track"]}/{r["run_id"]}'
+            lines += [f'**{r["profile"]} · {r["track"]} · {r["run_id"]}**', '', f'![{r["profile"]}]({folder}/{r["screenshot"]})', '']
     return '\n'.join(lines) + '\n'
 
 
@@ -232,6 +275,7 @@ def rebuild_index(results):
         r = core.read(f)
         art = f.with_name('artifact.json')
         r['has_asset'] = art.exists() and core.read(art).get('build_ok', False)
+        r['screenshot'] = 'screenshots/main.png' if f.with_name('screenshots').joinpath('main.png').is_file() else None
         reports.append(r)
     (results / 'README.md').write_text(index_readme(reports, github_url(core.ROOT), github_url(results)), encoding='utf-8')
     core.write(results / 'comparison.json', {'generated': core.now(), 'runs': reports})
@@ -253,15 +297,18 @@ def package(run):
         raise RuntimeError('Refusing to publish: the workspace contains this run\'s CLI login token in '
                            + ', '.join(hits[:5]) + '. Revoke that login and inspect the run.')
     dest.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(dest / 'screenshots', ignore_errors=True)
     subprocess.run(['git', 'archive', '--format=zip', '-o', str(dest / 'source.zip'), 'HEAD'], cwd=run.workspace, check=True)
 
     artifact = {'asset': None, 'sha256': None, 'size_bytes': None, 'build_ok': False,
-                'self_contained': False, 'self_contained_detail': '', 'release_tag': name,
+                'self_contained': False, 'self_contained_detail': '', 'screenshots': [], 'release_tag': name,
                 'source_commit': core.git(run.workspace, 'rev-parse', 'HEAD'), 'packaged': core.now()}
     buildable = all((product / f).is_file() for f in ('setup.sh', 'build.sh'))
     print('  building in a fresh container ...' if buildable else '  no setup.sh/build.sh, skipping build', flush=True)
-    if buildable and build_product(cfg, product, work / 'build.log'):
+    shots = work / 'screenshots'; shots.mkdir()
+    if buildable and build_product(cfg, product, work / 'build.log', shots):
         artifact['build_ok'] = True
+        artifact['screenshots'] = collect_screenshots(shots, dest / 'screenshots')
         artifact['self_contained'], artifact['self_contained_detail'] = self_contained(cfg, product / 'dist')
         assets = results / 'release-assets'; assets.mkdir(exist_ok=True)
         asset = assets / f'evosim-{name}-linux-x86_64.tar.gz'
@@ -282,6 +329,7 @@ def package(run):
     rebuild_index(results)
     print(f'  build: {"ok" if artifact["build_ok"] else "FAILED"}; self-contained: '
           f'{"yes" if artifact["self_contained"] else "no"} {artifact["self_contained_detail"]}'.rstrip())
+    print(f'  screenshots: {len(artifact["screenshots"])}')
     print(f'  written to {dest}')
     print('  review the results repository, then run: python3 run.py publish')
     return artifact

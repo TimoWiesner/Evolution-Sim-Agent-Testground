@@ -1,6 +1,6 @@
 {
   "id": "TASK-018",
-  "title": "Extinction and ecology integration",
+  "title": "Ecology integration and extinction",
   "dependencies": [
     "TASK-012",
     "TASK-014",
@@ -8,11 +8,22 @@
     "TASK-016",
     "TASK-017"
   ],
-  "objective": "Integrated food-chain loop without artificial repopulation; allow natural extinctions.",
+  "objective": "Join all parts into one running food chain, in which extinction is possible and final.",
   "acceptance_criteria": [
-    "Plants->herbivores->carnivores scenarios",
-    "starvation/extinction",
-    "no magic reseed."
+    "One tick runs climate, plants, herbivores, carnivores, reproduction, deaths and species updates in a documented order.",
+    "A simulation started from a configuration with only the fixed keys runs at least 1,000 ticks without errors.",
+    "Organisms are only created as the initial population or through reproduction. A kind that reaches zero stays at zero.",
+    "Scenario tests: without plants, herbivores and then carnivores die out; without herbivores, carnivores die out; plants alone persist.",
+    "For each kind, initial population + births − deaths equals the living population after every tick.",
+    "With the default parameters, plants survive and reproduce on their own, and herbivores with plenty of plants survive and reproduce for several hundred ticks."
+  ],
+  "decisions": [
+    "The order of the steps in a tick.",
+    "Balancing of the default parameters."
+  ],
+  "out_of_scope": [
+    "The command line (TASK-019).",
+    "Forcing a stable equilibrium: populations may collapse."
   ],
   "phases": [
     "plan",

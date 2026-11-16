@@ -1,15 +1,25 @@
 {
   "id": "TASK-009",
-  "title": "DNA inheritance and mutation",
+  "title": "Genome, inheritance and mutation",
   "dependencies": [
     "TASK-001",
     "TASK-008"
   ],
-  "objective": "Implement agent-decided genotype, crossing, trait expression, mutation.",
+  "objective": "Give every organism heritable DNA from which its traits are derived, following the genome decision of TASK-001.",
   "acceptance_criteria": [
-    "Trait bounds",
-    "mutation/no-mutation",
-    "parent-offspring inheritance tests."
+    "Every organism has a genome; its traits are computed from the genome by a deterministic function and stay within their valid ranges.",
+    "A child genome can be produced from one parent (copy) and from two parents (crossover).",
+    "Mutation has a configurable rate and strength and uses the simulation's generator.",
+    "Test: with mutation rate 0 a child genome contains only parental material; with a rate above 0 differences appear over many offspring.",
+    "A genetic distance between two genomes is defined: zero for identical genomes, symmetric, larger for more different genomes."
+  ],
+  "decisions": [
+    "Genome representation and the mapping from genes to traits.",
+    "Crossover and mutation operators."
+  ],
+  "out_of_scope": [
+    "Deciding when organisms reproduce (TASK-012, TASK-016).",
+    "Species assignment (TASK-017)."
   ],
   "phases": [
     "plan",

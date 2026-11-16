@@ -7,11 +7,20 @@
     "TASK-017",
     "TASK-019"
   ],
-  "objective": "Serialize complete organisms, genome, world, clock, RNG and climate for restoration.",
+  "objective": "Save a running simulation completely and continue it later as if it had never stopped.",
   "acceptance_criteria": [
-    "Uninterrupted vs checkpoint-resume statistical consistency",
-    "versioning & invalid-file behavior.",
-    "`./evosim run --save/--load` follow `docs/CONTRACT.md`: a resumed run reproduces the `state_hash`, `final` and `totals` of an uninterrupted run"
+    "`./evosim run --save/--load` follow `docs/CONTRACT.md`: a resumed run reproduces the `state_hash`, `final` and `totals` of an uninterrupted run",
+    "A checkpoint contains everything: organisms with genomes, world, climate and weather, clock, generator state, species records and the birth/death counters.",
+    "The file carries a format version.",
+    "A missing, damaged, truncated or wrong-version file gives exit status 2 and no result file.",
+    "Tests compare an uninterrupted run with save-and-resume for at least two split points, including a save at tick 0."
+  ],
+  "decisions": [
+    "File format.",
+    "Compression."
+  ],
+  "out_of_scope": [
+    "Saving and loading from the UI (TASK-024)."
   ],
   "phases": [
     "plan",

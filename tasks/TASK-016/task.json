@@ -7,12 +7,22 @@
     "TASK-014",
     "TASK-015"
   ],
-  "objective": "Two compatible parents, sexual DNA crossover, fertility, energy costs, offspring.",
+  "objective": "Let animals reproduce sexually: two parents, crossed and mutated DNA, real costs.",
   "acceptance_criteria": [
-    "No self mating",
-    "two-parent ancestry",
-    "inherited mutation",
-    "gestation/cooldown semantics."
+    "Offspring need two different living animals of the same kind that are close to each other, mature, have enough energy and are genetically compatible. An animal never mates with itself.",
+    "The offspring genome is a crossover of both parents plus mutation; both parent IDs and the generation are recorded.",
+    "Reproduction costs both parents energy.",
+    "After reproducing, a parent cannot reproduce again for a waiting time (cooldown or gestation).",
+    "The fertility trait influences the chance or the number of offspring.",
+    "Test: a single animal on its own never produces offspring."
+  ],
+  "decisions": [
+    "Mate search and mate choice.",
+    "Gestation or immediate birth; litter size.",
+    "The compatibility rule."
+  ],
+  "out_of_scope": [
+    "Naming and tracking species (TASK-017)."
   ],
   "phases": [
     "plan",

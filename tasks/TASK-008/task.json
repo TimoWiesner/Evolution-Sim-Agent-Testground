@@ -1,12 +1,25 @@
 {
   "id": "TASK-008",
-  "title": "Entity trait and lifecycle model",
+  "title": "Organisms and life cycle",
   "dependencies": [
     "TASK-005"
   ],
-  "objective": "Define organisms, IDs, age, health, energy, traits, death causes.",
+  "objective": "Define what an organism is and the rules of being born, living and dying that all three kinds share.",
   "acceptance_criteria": [
-    "Health bounds, lifecycle invariants, simultaneous births/deaths tests."
+    "Three kinds exist: plants, herbivores, carnivores.",
+    "Every organism has an ID that is unique and never reused, a kind, a position, age, energy, health, its traits, the IDs of its parents and a generation number.",
+    "Traits include at least speed, strength, fertility and maximum lifespan or health, and for animals one behavioural tendency such as aggression or caution.",
+    "Energy and health never leave their valid range. An organism that dies is removed, never acts again and has its cause of death recorded.",
+    "Births and deaths are counted per kind since tick 0.",
+    "Births and deaths that happen in the same tick are handled by one documented rule; tests cover it."
+  ],
+  "decisions": [
+    "The full list of traits and their ranges.",
+    "How organisms are stored."
+  ],
+  "out_of_scope": [
+    "Genomes (TASK-009).",
+    "Feeding, movement and reproduction behaviour."
   ],
   "phases": [
     "plan",

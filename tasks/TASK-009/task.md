@@ -1,15 +1,26 @@
-# TASK-009: DNA inheritance and mutation
+# TASK-009: Genome, inheritance and mutation
 
-## Dependencies
+## Depends on
 TASK-001, TASK-008
 
-## Concrete implementation scope
-Implement agent-decided genotype, crossing, trait expression, mutation.
+## Goal
+Give every organism heritable DNA from which its traits are derived, following the genome decision of TASK-001.
 
-## Acceptance criteria
-- Trait bounds
-- mutation/no-mutation
-- parent-offspring inheritance tests.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- Every organism has a genome; its traits are computed from the genome by a deterministic function and stay within their valid ranges.
+- A child genome can be produced from one parent (copy) and from two parents (crossover).
+- Mutation has a configurable rate and strength and uses the simulation's generator.
+- Test: with mutation rate 0 a child genome contains only parental material; with a rate above 0 differences appear over many offspring.
+- A genetic distance between two genomes is defined: zero for identical genomes, symmetric, larger for more different genomes.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- Genome representation and the mapping from genes to traits.
+- Crossover and mutation operators.
+
+## Not part of this task
+- Deciding when organisms reproduce (TASK-012, TASK-016).
+- Species assignment (TASK-017).

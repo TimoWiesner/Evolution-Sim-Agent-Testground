@@ -5,9 +5,21 @@
     "TASK-008",
     "TASK-010"
   ],
-  "objective": "Herbivore and carnivore vision, movement, speed, energy costs and toroidal seeking.",
+  "objective": "Let herbivores and carnivores perceive their surroundings and move through the world.",
   "acceptance_criteria": [
-    "Movement capped by traits, sensing near borders, occupancy semantics."
+    "An animal perceives the organisms within its vision range, which follows from its traits, also across the world's edges.",
+    "Animals move from cell to cell; the distance per tick is limited by the speed trait.",
+    "Moving costs energy, and moving faster or further costs more.",
+    "An animal heading for a target takes the shortest way, across an edge where that is shorter.",
+    "One documented rule says whether several organisms may share a cell; it is applied everywhere.",
+    "The spatial index is kept up to date. Tests cover sensing and movement at the edges."
+  ],
+  "decisions": [
+    "Movement when nothing interesting is in sight.",
+    "The cell-sharing rule."
+  ],
+  "out_of_scope": [
+    "What animals do when they reach food, prey or a mate (TASK-014 to TASK-016)."
   ],
   "phases": [
     "plan",

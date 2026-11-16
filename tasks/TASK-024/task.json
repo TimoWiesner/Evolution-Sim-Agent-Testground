@@ -1,17 +1,35 @@
 {
   "id": "TASK-024",
-  "title": "UI run controls and inspection",
+  "title": "UI: run controls and inspector",
   "dependencies": [
     "TASK-020",
     "TASK-022",
     "TASK-023"
   ],
-  "objective": "Wire pause/resume/step/reset/speed and entity inspector with genome, traits, energy and species.",
+  "objective": "Let the user steer the simulation and look inside any organism.",
   "acceptance_criteria": [
-    "Single-step advances exactly one tick",
-    "inspect correct ID",
-    "speed nonnegative."
+    "Controls for run, pause, single step, reset and speed. A single step advances exactly one tick.",
+    "Reset rebuilds the world from the current configuration and seed and gives the same starting world again.",
+    "Speed has at least three levels and cannot become negative.",
+    "The current tick and the population of each kind are always visible.",
+    "Selecting an organism in the world view opens an inspector with its ID, kind, species, age, energy, health, traits, genome and parents.",
+    "The inspector keeps following the selected organism while the simulation runs and shows when it has died.",
+    "The current state can be saved to and loaded from a checkpoint file in the UI.",
+    "The control logic is covered by tests that need no display."
   ],
+  "decisions": [
+    "Buttons, keyboard shortcuts or both.",
+    "How a genome is presented."
+  ],
+  "out_of_scope": [
+    "Editing parameters and charts (TASK-025)."
+  ],
+  "design_freedom": [
+    "How the selected organism is highlighted and how its genome and traits are visualised.",
+    "Feedback and transitions when the simulation state changes.",
+    "Extras such as following an organism with the camera, showing its vision range or its family."
+  ],
+  "screenshots": "Keep `./evosim ui --screenshots DIR` working; you may add an image of the inspector.",
   "phases": [
     "plan",
     "implement",

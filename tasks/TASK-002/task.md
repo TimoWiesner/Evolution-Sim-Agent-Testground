@@ -1,18 +1,27 @@
 # TASK-002: Project bootstrap and quality gates
 
-## Dependencies
+## Depends on
 TASK-001
 
-## Concrete implementation scope
-Create executable skeleton, development scripts, dependency manifest and baseline tests for chosen stack.
+## Goal
+Create a runnable, still empty project skeleton with the three entry points and one command that runs all tests.
 
-## Acceptance criteria
-- Clean install/build documented
-- CLI help works
-- tests run in CI-like command.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
+
 - `./setup.sh`, `./evosim` and `./build.sh` exist as defined in `docs/CONTRACT.md` section 1
 - `./evosim version` prints the contract JSON after `./setup.sh` in a fresh container
 - `./build.sh` produces `dist/evosim` and `dist/evosim version` works
+- `./evosim --help` lists the available commands; an unknown command gives exit status 2.
+- One documented command runs the whole test suite; at least one test exists and passes.
+- `README.md` explains how to install, build and test. `dist/` and other build output are ignored by Git.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- Project layout, build tool, test framework.
+- How `dist/` is made self-contained.
+
+## Not part of this task
+- Simulation behaviour.
+- The `run`, `batch` and `ui` commands.

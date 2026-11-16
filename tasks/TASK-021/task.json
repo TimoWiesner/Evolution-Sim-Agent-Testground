@@ -1,14 +1,25 @@
 {
   "id": "TASK-021",
-  "title": "Batch runner and export",
+  "title": "Batch runs and export",
   "dependencies": [
     "TASK-019",
     "TASK-020"
   ],
-  "objective": "Sweep parameters and seeds; JSON/CSV aggregation and comparison.",
+  "objective": "Run many simulations in one go and compare them.",
   "acceptance_criteria": [
-    "At least 2x2 matrix fixture, per-run metadata and reproducible aggregate.",
-    "`./evosim batch` writes per-seed results and a summary as defined in `docs/CONTRACT.md` section 2"
+    "`./evosim batch` writes per-seed results and a summary as defined in `docs/CONTRACT.md` section 2",
+    "In addition to seeds, at least one parameter can be varied over several values. A test runs a 2 values × 2 seeds matrix.",
+    "`summary.json` lists every run with its seed, parameters and ticks, and gives aggregates across runs: mean, minimum and maximum of the final population per kind and how often each kind went extinct.",
+    "The summary can also be exported as CSV.",
+    "The same batch run twice gives the same summary, apart from time measurements."
+  ],
+  "decisions": [
+    "How parameter sweeps are specified.",
+    "Whether runs execute in parallel, as long as results stay reproducible.",
+    "Additional statistics."
+  ],
+  "out_of_scope": [
+    "Charts."
   ],
   "phases": [
     "plan",

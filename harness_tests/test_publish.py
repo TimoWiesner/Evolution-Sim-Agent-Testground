@@ -30,6 +30,25 @@ class PublishTests(unittest.TestCase):
   self.assertIn('| Cost | — |',md);self.assertIn('120.5 ticks per second',md)
   md=publish.run_readme({**REPORT,'evaluation':None},{**art,'build_ok':False},None,None)
   self.assertIn('not scored',md);self.assertIn('No executable',md)
+ def test_screenshots_are_filtered_and_shown(self):
+  png=b'\x89PNG\r\n\x1a\n'+b'x'*50
+  with tempfile.TemporaryDirectory() as d:
+   d=pathlib.Path(d);src=d/'in';src.mkdir()
+   (src/'main.png').write_bytes(png);(src/'Charts View.png').write_bytes(png)
+   (src/'fake.png').write_text('not an image');(src/'empty.png').write_bytes(b'');(src/'notes.txt').write_text('x')
+   (src/'link.png').symlink_to('/etc/hostname')
+   for i in range(8):(src/f'z{i}.png').write_bytes(png)
+   names=publish.collect_screenshots(src,d/'out')
+   self.assertEqual(names[:2],['main.png','charts-view.png']);self.assertEqual(len(names),publish.MAX_SCREENSHOTS)
+   self.assertEqual(sorted(p.name for p in (d/'out').iterdir()),sorted(names))
+   self.assertEqual(publish.collect_screenshots(d/'missing',d/'out'),[]);self.assertFalse((d/'out').exists())
+  art={'build_ok':False,'screenshots':['main.png','charts-view.png']}
+  md=publish.run_readme(REPORT,art,None,None)
+  self.assertIn('![main](screenshots/main.png)',md);self.assertIn('![charts-view](screenshots/charts-view.png)',md)
+  self.assertIn('wrote no screenshots',publish.run_readme(REPORT,{'build_ok':False},None,None))
+  idx=publish.index_readme([{**REPORT,'screenshot':'screenshots/main.png'}],None,None)
+  self.assertIn('## Interfaces',idx);self.assertIn('(results/p/sequential/r1/screenshots/main.png)',idx)
+  self.assertNotIn('## Interfaces',publish.index_readme([REPORT],None,None))
  def test_index_lists_runs_without_check_details(self):
   md=publish.index_readme([{**REPORT,'has_asset':True}],'https://example/harness','https://example/results')
   self.assertIn('results/p/sequential/r1/README.md',md);self.assertIn('releases/tag/p-sequential-r1',md)

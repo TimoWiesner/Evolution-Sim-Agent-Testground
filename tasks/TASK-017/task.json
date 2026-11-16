@@ -1,14 +1,26 @@
 {
   "id": "TASK-017",
-  "title": "Species detection and phylogeny",
+  "title": "Species and family tree",
   "dependencies": [
     "TASK-009",
     "TASK-012",
     "TASK-016"
   ],
-  "objective": "Agent-designed genetic-distance species assignment for all organism groups and lineage tracking.",
+  "objective": "Recognise species from genetic distance and keep track of how they descend from each other.",
   "acceptance_criteria": [
-    "Deterministic naming/IDs, threshold edge cases, divergence tests."
+    "Every organism belongs to a species of its kind, assigned by a documented rule based on genetic distance.",
+    "Species IDs and names are deterministic: the same run produces the same ones.",
+    "A new species arises when a lineage has diverged far enough. A test forces divergence and observes the split; the behaviour exactly at the threshold is tested.",
+    "Each species record keeps its parent species, the tick it arose and, once it has no living members, the tick it went extinct.",
+    "The number of living species per kind can be queried at any tick."
+  ],
+  "decisions": [
+    "The species criterion and its threshold.",
+    "When organisms are re-classified.",
+    "Naming scheme."
+  ],
+  "out_of_scope": [
+    "Charts and UI display of species."
   ],
   "phases": [
     "plan",

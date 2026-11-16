@@ -4,11 +4,21 @@
   "dependencies": [
     "TASK-002"
   ],
-  "objective": "Implement cell positions, neighbor distances and wrap-aware routing.",
+  "objective": "Provide the geometry of the world: a rectangular grid whose left/right and top/bottom edges are joined.",
   "acceptance_criteria": [
-    "Border tests for all four edges",
-    "negative and multiwrap coordinates",
-    "rectangular maps."
+    "Any integer coordinate is mapped to a valid cell, including negative values and values several world widths away.",
+    "Distance and direction between two cells use the shortest way, across an edge where that is shorter, on both axes.",
+    "The cells within a given radius of a cell can be listed without duplicates, also when the radius is larger than the world.",
+    "Non-square worlds and very small worlds (1×1, 1×N) work.",
+    "Tests cover all four edges, the corners, negative and multiply wrapped coordinates and a 1×1 world."
+  ],
+  "decisions": [
+    "The distance measure (for example Chebyshev, Manhattan or Euclidean); document it and use it everywhere.",
+    "The data types for positions and directions."
+  ],
+  "out_of_scope": [
+    "Organisms and the spatial index (TASK-010).",
+    "Climate."
   ],
   "phases": [
     "plan",

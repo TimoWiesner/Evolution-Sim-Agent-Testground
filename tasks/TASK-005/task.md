@@ -1,15 +1,27 @@
-# TASK-005: Clock, RNG and tick scheduler
+# TASK-005: Clock, random numbers and tick scheduler
 
-## Dependencies
+## Depends on
 TASK-003, TASK-004
 
-## Concrete implementation scope
-Provide isolated simulation state and reproducible tick/order/event pipeline.
+## Goal
+Build the frame every later feature plugs into: one simulation state that advances tick by tick and reproducibly.
 
-## Acceptance criteria
-- Seed repeated-run trace test
-- stable tie-breaking
-- no UI dependency.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- A simulation state holds the tick counter, the random number generator and the world, and one function advances it by exactly one tick.
+- All randomness comes from a generator seeded by the configuration. Wall-clock time and unseeded global generators are not used.
+- The order of the steps inside a tick and the order in which organisms act are fixed and documented; ties are broken by a stable rule.
+- The generator state can be exported and restored exactly (needed for checkpoints later).
+- Test: two runs with the same seed give an identical trace over at least 100 ticks; a different seed gives a different trace.
+- The simulation core has no dependency on any UI code.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- Random number algorithm.
+- Order of the steps in a tick.
+- How steps and events are represented.
+
+## Not part of this task
+- The actual behaviour of climate, plants and animals.

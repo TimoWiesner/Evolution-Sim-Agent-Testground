@@ -1,14 +1,25 @@
 {
   "id": "TASK-010",
-  "title": "Spatial search implementation",
+  "title": "Spatial search",
   "dependencies": [
     "TASK-001",
     "TASK-004",
     "TASK-008"
   ],
-  "objective": "Implement agent-chosen performant radius search and move/update index.",
+  "objective": "Find the organisms near a cell quickly, following the neighbour-search decision of TASK-001.",
   "acceptance_criteria": [
-    "Wrap-crossing correctness, stale-removal checks, brute-force comparison."
+    "A query returns all organisms within a radius of a cell, optionally only of one kind, correctly across the world's edges and without duplicates.",
+    "Adding, moving and removing organisms keeps the index correct; a removed or moved organism is never returned from its old place.",
+    "Results come back in a deterministic order.",
+    "A randomised test compares at least 1,000 queries with a simple brute-force search, including small worlds and radii larger than the world.",
+    "A measurement with about 2,000 organisms shows the index is faster than brute force; the numbers are recorded in the documentation."
+  ],
+  "decisions": [
+    "The data structure.",
+    "The query interface."
+  ],
+  "out_of_scope": [
+    "Using the search for behaviour (TASK-013 onwards)."
   ],
   "phases": [
     "plan",

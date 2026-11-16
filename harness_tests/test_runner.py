@@ -69,8 +69,22 @@ class RunnerTests(unittest.TestCase):
   sp=specs()
   for t in ('TASK-002','TASK-003','TASK-019','TASK-021','TASK-022','TASK-023','TASK-027'):
    self.assertTrue(any('docs/CONTRACT.md' in c for c in sp[t]['acceptance_criteria']),t)
+  self.assertIn('--screenshots DIR',(core.ROOT/'starter/docs/CONTRACT.md').read_text())
+ def test_tasks_share_one_format(self):
+  from harness import core
+  sp=specs();self.assertEqual(len(sp),27)
+  for t,s in sp.items():
    md=(core.ROOT/'tasks'/t/'task.md').read_text()
-   for c in sp[t]['acceptance_criteria']:self.assertIn(c,md)
+   for head in ('## Depends on','## Goal','## Must have','## Your decisions','## Not part of this task'):self.assertIn(head,md,t)
+   self.assertIn(s['objective'],md)
+   self.assertGreaterEqual(len(s['acceptance_criteria']),5,t)
+   for c in s['acceptance_criteria']+s['decisions']+s['out_of_scope']:self.assertIn(c,md,t)
+   ui=t in ('TASK-023','TASK-024','TASK-025')
+   self.assertEqual('design_freedom' in s,ui,t);self.assertEqual('## Design freedom' in md,ui,t)
+   if ui:
+    self.assertIn('--screenshots',s['screenshots'])
+    for c in s['design_freedom']:self.assertIn(c,md)
+   self.assertNotIn('Python versus Rust',md)
  def test_evaluation_keeps_tests_away_from_the_network(self):
   from harness import core
   cfg=config()

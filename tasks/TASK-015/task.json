@@ -1,13 +1,24 @@
 {
   "id": "TASK-015",
-  "title": "Carnivore hunting and predation",
+  "title": "Carnivore hunting",
   "dependencies": [
     "TASK-013",
     "TASK-014"
   ],
-  "objective": "Carnivores pursue and consume herbivores with strength, defense, chance and risk tradeoffs.",
+  "objective": "Make carnivores live off herbivores through hunts that can succeed or fail.",
   "acceptance_criteria": [
-    "Prey killed once, prey escape possible, energy transfer test."
+    "Carnivores pursue herbivores within their vision range and can attack only from the same or an adjacent cell.",
+    "The outcome of an attack depends on the traits of both animals and on chance from the simulation's generator. Test over many attacks: both kills and escapes occur.",
+    "A killed herbivore dies exactly once, with predation as its cause of death, and cannot be eaten twice.",
+    "The energy a carnivore gains is at most the energy its prey had.",
+    "Hunting costs energy whether it succeeds or not; a carnivore without prey starves."
+  ],
+  "decisions": [
+    "The attack formula.",
+    "What happens when several carnivores target the same prey (document it)."
+  ],
+  "out_of_scope": [
+    "Reproduction (TASK-016)."
   ],
   "phases": [
     "plan",

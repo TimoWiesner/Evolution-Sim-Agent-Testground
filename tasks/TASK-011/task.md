@@ -1,13 +1,27 @@
-# TASK-011: Plant resources and growth
+# TASK-011: Plant growth and resources
 
-## Dependencies
+## Depends on
 TASK-006, TASK-008, TASK-009
 
-## Concrete implementation scope
-Plant nutrient/bioenergy system with climate-modulated growth, competition and mortality.
+## Goal
+Make plants live off their environment: they grow where climate allows, compete for limited resources, age and die.
 
-## Acceptance criteria
-- Biomass conservation policy, arid/cold comparison, plant aging tests.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- Plants gain energy from the resources of their cell; the gain depends on the cell's current temperature and water.
+- Test: the same plant grows more slowly, or not at all, in a cell that is too cold or too dry than in a favourable cell.
+- Resources per cell are limited, so plants in the same place compete and growth cannot be unlimited.
+- Plants age and die of old age, lack of energy or hostile climate.
+- The documentation states where plant energy comes from and what limits it; no energy appears without such a source.
+- Genome-derived traits influence growth or tolerance.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- The resource model (light, water, nutrients or a simplification).
+- Which plant traits exist.
+
+## Not part of this task
+- Reproduction and spreading (TASK-012).
+- Being eaten (TASK-014).

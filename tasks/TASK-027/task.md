@@ -1,15 +1,27 @@
-# TASK-027: Long-run reliability and delivery
+# TASK-027: Reliability and delivery
 
-## Dependencies
+## Depends on
 TASK-018, TASK-021, TASK-022, TASK-025, TASK-026
 
-## Concrete implementation scope
-Property tests, 10k+-tick scenarios, regression suite, docs, runnable end-to-end demo and final self-audit.
+## Goal
+Prove that the finished product is robust, and hand it over so that someone else can use it.
 
-## Acceptance criteria
-- Run logs, checked edge cases, UI+headless instructions, outstanding limitations clearly listed.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
+
 - every command and required behaviour in `docs/CONTRACT.md` is verified and the evidence recorded
 - `./build.sh` output is self-contained as required by `docs/CONTRACT.md` section 6
+- Runs of at least 10,000 ticks complete for at least three seeds without errors; the results are recorded.
+- Randomised tests check the invariants over many seeds and configurations: birth/death accounting, value ranges, wrapping, determinism.
+- The whole test suite passes with the one documented command.
+- `README.md` covers installation, the `run`, `batch` and `ui` commands, the configuration parameters and one command that starts an interesting demo scenario.
+- A self-audit lists every requirement of `docs/PROJECT.md` as met, partly met or missing, and the known limitations are stated openly.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- Where the evidence is recorded (for example `docs/VERIFICATION.md`).
+- The demo scenario.
+
+## Not part of this task
+- New features. Fix what the checks uncover; record what cannot be fixed.

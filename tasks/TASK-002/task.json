@@ -4,14 +4,22 @@
   "dependencies": [
     "TASK-001"
   ],
-  "objective": "Create executable skeleton, development scripts, dependency manifest and baseline tests for chosen stack.",
+  "objective": "Create a runnable, still empty project skeleton with the three entry points and one command that runs all tests.",
   "acceptance_criteria": [
-    "Clean install/build documented",
-    "CLI help works",
-    "tests run in CI-like command.",
     "`./setup.sh`, `./evosim` and `./build.sh` exist as defined in `docs/CONTRACT.md` section 1",
     "`./evosim version` prints the contract JSON after `./setup.sh` in a fresh container",
-    "`./build.sh` produces `dist/evosim` and `dist/evosim version` works"
+    "`./build.sh` produces `dist/evosim` and `dist/evosim version` works",
+    "`./evosim --help` lists the available commands; an unknown command gives exit status 2.",
+    "One documented command runs the whole test suite; at least one test exists and passes.",
+    "`README.md` explains how to install, build and test. `dist/` and other build output are ignored by Git."
+  ],
+  "decisions": [
+    "Project layout, build tool, test framework.",
+    "How `dist/` is made self-contained."
+  ],
+  "out_of_scope": [
+    "Simulation behaviour.",
+    "The `run`, `batch` and `ui` commands."
   ],
   "phases": [
     "plan",

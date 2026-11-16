@@ -1,16 +1,26 @@
 {
   "id": "TASK-019",
-  "title": "Headless simulation CLI",
+  "title": "Headless command line",
   "dependencies": [
     "TASK-003",
     "TASK-018"
   ],
-  "objective": "Single config/seed/tick runner with exit status and machine-readable output.",
+  "objective": "Make the simulation usable from the command line and produce the result file the benchmark reads.",
   "acceptance_criteria": [
-    "No display requirements",
-    "documented CLI invocation",
-    "deterministic result schema.",
-    "`./evosim run` implements the flags, result JSON, determinism and error behaviour of `docs/CONTRACT.md` sections 2, 4 and 5 (checkpoint flags excepted)"
+    "`./evosim run` implements the flags, result JSON, determinism and error behaviour of `docs/CONTRACT.md` sections 2, 4 and 5 (checkpoint flags excepted)",
+    "It runs without a display.",
+    "Exactly the requested number of ticks is simulated, also after everything is extinct; `--ticks 0` is valid.",
+    "Errors give exit status 2, a message on stderr and no result file.",
+    "`state_hash` covers the complete simulation state, so any difference in state changes it.",
+    "An end-to-end test calls `./evosim run` twice with the same seed and compares the results. `README.md` shows an example call."
+  ],
+  "decisions": [
+    "Additional flags and additional keys in the result.",
+    "The hash function."
+  ],
+  "out_of_scope": [
+    "`--save` and `--load` (TASK-022).",
+    "`batch` (TASK-021)."
   ],
   "phases": [
     "plan",

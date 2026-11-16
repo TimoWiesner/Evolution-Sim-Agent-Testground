@@ -8,7 +8,7 @@ Collect per-phase duration, return code, recovery attempts, review cycles, token
 Suggested comparative score (only if all metrics are populated): Quality 45% (acceptance coverage and external checks), autonomy 20% (completed without operator recovery), efficiency 15% (duration and reported costs relative to baselines), architecture 20% (manual rubric). `report` emits components and an **indicative** quality/autonomy summary, NOT a complete objective aggregate without manual scoring.
 
 ## Manual rubric (0–5 each)
-Modularity/interfaces; readability/testability; faithful simulation design; genetic/speciation rigor; UI operability; documentation/security/reproducibility. Record assessor, evidence and notes in `manual-review.json` in the run directory. Different assessors should use same rubric. `report` integrates supplied manual scores, never fabricates them.
+Modularity/interfaces; readability/testability; faithful simulation design; genetic/speciation rigor; UI operability; UI visual design (from the published screenshots); documentation/security/reproducibility. Record assessor, evidence and notes in `manual-review.json` in the run directory. Different assessors should use same rubric. `report` integrates supplied manual scores, never fabricates them.
 
 ## Safety / integrity
 External checks are operator-owned and not copied to workspace. Automatic checks include handoff validation and safe noninteractive smoke verification; stronger acceptance scripts should be supplied by evaluator after implementation language emerges. CLI self-tests are not proof of correct physics. Treat speed >=100 ticks/s at 2k entities as a target to measure under recorded hardware, not a portable global invariant.

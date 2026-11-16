@@ -1,13 +1,25 @@
-# TASK-015: Carnivore hunting and predation
+# TASK-015: Carnivore hunting
 
-## Dependencies
+## Depends on
 TASK-013, TASK-014
 
-## Concrete implementation scope
-Carnivores pursue and consume herbivores with strength, defense, chance and risk tradeoffs.
+## Goal
+Make carnivores live off herbivores through hunts that can succeed or fail.
 
-## Acceptance criteria
-- Prey killed once, prey escape possible, energy transfer test.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- Carnivores pursue herbivores within their vision range and can attack only from the same or an adjacent cell.
+- The outcome of an attack depends on the traits of both animals and on chance from the simulation's generator. Test over many attacks: both kills and escapes occur.
+- A killed herbivore dies exactly once, with predation as its cause of death, and cannot be eaten twice.
+- The energy a carnivore gains is at most the energy its prey had.
+- Hunting costs energy whether it succeeds or not; a carnivore without prey starves.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- The attack formula.
+- What happens when several carnivores target the same prey (document it).
+
+## Not part of this task
+- Reproduction (TASK-016).

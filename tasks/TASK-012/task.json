@@ -5,11 +5,20 @@
     "TASK-009",
     "TASK-011"
   ],
-  "objective": "Mutating plant lineages reproducing and spreading, including optional pollination as designed.",
+  "objective": "Let plants multiply, spread across the world and pass on mutated genomes.",
   "acceptance_criteria": [
-    "Seed spread under wrap",
-    "reproduction resource costs",
-    "lineage metadata."
+    "A plant reproduces only when it has enough energy, and reproduction costs energy.",
+    "Offspring appear within a dispersal distance of the parent, also across the world's edges.",
+    "Offspring inherit the parent genome with mutation; parent ID and generation are recorded.",
+    "No offspring appears where there is no room or no resources for it.",
+    "Plants only come from plants: a world with zero plants stays at zero. A test proves it."
+  ],
+  "decisions": [
+    "Asexual reproduction only, or pollination between two plants as well.",
+    "The dispersal pattern."
+  ],
+  "out_of_scope": [
+    "Species (TASK-017)."
   ],
   "phases": [
     "plan",

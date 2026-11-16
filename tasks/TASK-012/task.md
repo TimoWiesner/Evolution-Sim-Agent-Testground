@@ -1,15 +1,25 @@
 # TASK-012: Plant reproduction and dispersal
 
-## Dependencies
+## Depends on
 TASK-009, TASK-011
 
-## Concrete implementation scope
-Mutating plant lineages reproducing and spreading, including optional pollination as designed.
+## Goal
+Let plants multiply, spread across the world and pass on mutated genomes.
 
-## Acceptance criteria
-- Seed spread under wrap
-- reproduction resource costs
-- lineage metadata.
+## Must have
+The review passes only if every point is met and shown by a test or a recorded command.
 
-## Workflow
-Three strictly isolated phases: PLAN (inspect actual code and create plan), IMPLEMENT (execute and test plan), REVIEW (independent requirements/code/tests audit). If review fails, repeat starting from PLAN, maximum three cycles. Handoffs go to `tasks/<ID>/handoffs/`. Keep project docs updated. Do not change task specification.
+- A plant reproduces only when it has enough energy, and reproduction costs energy.
+- Offspring appear within a dispersal distance of the parent, also across the world's edges.
+- Offspring inherit the parent genome with mutation; parent ID and generation are recorded.
+- No offspring appears where there is no room or no resources for it.
+- Plants only come from plants: a world with zero plants stays at zero. A test proves it.
+
+## Your decisions
+Decide these yourself and write down what you chose and why.
+
+- Asexual reproduction only, or pollination between two plants as well.
+- The dispersal pattern.
+
+## Not part of this task
+- Species (TASK-017).

@@ -1,18 +1,35 @@
 {
   "id": "TASK-025",
-  "title": "UI scenarios, presets and charts",
+  "title": "UI: scenarios, presets and charts",
   "dependencies": [
     "TASK-003",
     "TASK-020",
     "TASK-021",
     "TASK-024"
   ],
-  "objective": "UI initial parameter editing, presets, config import/export and charts for genetics & diversity.",
+  "objective": "Let the user set up their own experiments in the UI and watch evolution in charts.",
   "acceptance_criteria": [
-    "Roundtrip config",
-    "series and genotype plots",
-    "validation error presentation."
+    "A new world can be started from the UI: choose a preset, then edit seed, world size, initial populations and at least five further parameters.",
+    "Invalid input is shown next to the affected field and the simulation does not start with it.",
+    "The configuration can be exported to and imported from a JSON file; export followed by import gives the same configuration.",
+    "Charts that update while the simulation runs: population per kind over time, births and deaths, number of species, and the mean of at least one trait over time.",
+    "A chart shows the distribution of a selectable trait in the current population.",
+    "Charts have axis labels and a legend.",
+    "The configuration and chart-data logic is covered by tests that need no display."
   ],
+  "decisions": [
+    "Chart library or own drawing code.",
+    "Which parameters are editable beyond the required ones."
+  ],
+  "out_of_scope": [
+    "New simulation features."
+  ],
+  "design_freedom": [
+    "Chart styling and how charts, world view and controls share the screen.",
+    "How presets are presented, for example as cards with a short description.",
+    "Extras such as a species family tree, comparing two trait distributions or exporting a chart as an image."
+  ],
+  "screenshots": "Update `./evosim ui --screenshots DIR` so that `main.png` shows the finished interface, and add at least one image that shows the charts.",
   "phases": [
     "plan",
     "implement",

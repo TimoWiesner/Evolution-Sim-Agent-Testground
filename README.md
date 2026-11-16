@@ -163,8 +163,24 @@ Agents choose language, architecture and UI themselves, but every product must e
 - `evosim run` takes a fixed set of flags and a few fixed configuration keys and writes a fixed result JSON (populations, species, births and deaths, a state hash, speed).
 - Runs must be deterministic per seed, a checkpoint resume must reproduce an uninterrupted run exactly, and extinct kinds must stay extinct.
 - `evosim ui --smoke-test` must start the real UI and exit cleanly.
+- `evosim ui --screenshots DIR` must write images of the real UI, which the results repository shows side by side.
 
 This makes products from different models testable with one black-box suite and packageable with one build step. Seven of the 27 tasks carry the matching acceptance criteria.
+
+## Tasks
+
+All 27 task files have the same sections, so that weaker models are not left guessing and stronger ones know where their freedom lies:
+
+| Section | Meaning |
+|---|---|
+| Goal | One sentence on what the task is for. |
+| Must have | Separate, checkable points. The agent's review may pass the task only if all are met. |
+| Your decisions | What the agent decides and has to document. |
+| Not part of this task | What belongs to other tasks. |
+
+The three UI tasks (23 to 25) add two sections. "Must have" is a functional baseline that a small model can reach: world view, controls, inspector, parameter editing, charts. "Design freedom" hands the look and feel to the agent, with ideas but no requirements, and can never fail a task. "Screenshots" asks the product to render its own interface to PNG files; this is scored by one hidden check and published, but does not block the task.
+
+The technology is open as well: any language or framework that runs in the sandbox image.
 
 ## What is and is not measured today
 
@@ -180,14 +196,14 @@ Token counts are normalised across CLIs: cached input is listed separately becau
 
 ### Hidden tests
 
-Product quality is scored by a black-box suite kept in a separate private repository, so agents cannot read it and it cannot leak into training data. It currently has 41 pass/fail checks in eight categories: contract conformance, determinism, checkpoints, ecology, robustness, performance, distributable and UI start-up.
+Product quality is scored by a black-box suite kept in a separate private repository, so agents cannot read it and it cannot leak into training data. It currently has 42 pass/fail checks in eight categories: contract conformance, determinism, checkpoints, ecology, robustness, performance, distributable and UI (start-up and screenshots).
 
 - The suite runs after every completed task, on the committed state, and only uses the interface contract. A check counts once the task that owns it is done.
 - Results are stored with the run and are **never shown to the agent**. They do not influence the run; a task still counts as done when the agent's own review passes. The gap between the two is part of what the benchmark shows.
 - Scoring happens in two fresh containers: the first runs `./setup.sh` and `./build.sh` with network access but without the tests; the second runs the tests with no network at all.
 - Results are reported as passed/total per category. There is no weighted total, so a strong category cannot hide a broken one.
 
-Without the private repository (`eval.path` in `benchmark.json`) the harness still works; runs are simply not scored. The usability of the UI is judged by hand with the rubric in `acceptance/MANUAL_REVIEW.md`.
+Without the private repository (`eval.path` in `benchmark.json`) the harness still works; runs are simply not scored. The usability and the visual design of the UI are judged by hand with the rubric in `acceptance/MANUAL_REVIEW.md`, using the published screenshots.
 
 ## Publishing results
 
@@ -196,13 +212,13 @@ Results live in a separate public repository (`results.path` in `benchmark.json`
 `package` takes the final committed state of a run and:
 
 1. checks that the source does not contain the run's CLI login token, and refuses if it does;
-2. runs `./setup.sh` and `./build.sh` in a fresh container;
+2. runs `./setup.sh` and `./build.sh` in a fresh container, then lets the product write its screenshots (`./evosim ui --screenshots`) on a virtual display;
 3. tests whether `dist/` really is self-contained, by running it on a bare Ubuntu 24.04 with no runtimes and no network;
-4. writes `results/<profile>/<track>/<run-id>/` with a readable summary, `report.json`, `source.zip` and `artifact.json`, and regenerates the results index.
+4. writes `results/<profile>/<track>/<run-id>/` with a readable summary, `report.json`, `source.zip`, `artifact.json` and `screenshots/`, and regenerates the results index.
 
 `publish` commits and pushes the results repository and uploads each executable as a GitHub Release asset (needs the GitHub CLI `gh`). Nothing is pushed until you run it; `--dry-run` shows the commands.
 
-Published are figures, the source the agent wrote, and hidden-test totals per category. Raw CLI logs, the container home and individual check results never leave the run folder.
+Published are figures, the source the agent wrote, its screenshots, and hidden-test totals per category. Raw CLI logs, the container home and individual check results never leave the run folder.
 
 ## Safety
 

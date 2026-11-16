@@ -1,16 +1,36 @@
 {
   "id": "TASK-023",
-  "title": "UI shell, world renderer",
+  "title": "UI: window and world view",
   "dependencies": [
     "TASK-006",
     "TASK-013",
     "TASK-019"
   ],
-  "objective": "Agent-choice desktop/web UI showing climate cells and differentiated organisms with pan and zoom.",
+  "objective": "Create the user interface and its centrepiece: a live view of the world.",
   "acceptance_criteria": [
-    "Launch instructions, inspectable viewport, 1k entities usable.",
-    "`./evosim ui --smoke-test` passes as defined in `docs/CONTRACT.md` section 2 on a virtual display"
+    "`./evosim ui` starts the interface, as a desktop window or as a local server with a browser page. It drives the same simulation engine as the command line.",
+    "The world view shows every cell coloured by its climate or biome, and the living organisms on top. Plants, herbivores and carnivores can be told apart at a glance.",
+    "A legend explains the colours and symbols.",
+    "The view can be panned and zoomed.",
+    "With 1,000 organisms the view stays usable: it keeps updating several times per second while the simulation runs.",
+    "`./evosim ui --smoke-test` passes as defined in `docs/CONTRACT.md` section 2 on a virtual display",
+    "`README.md` explains how to start the UI."
   ],
+  "decisions": [
+    "Desktop or browser, and the framework (see the decision of TASK-001).",
+    "How organisms are drawn."
+  ],
+  "out_of_scope": [
+    "Run controls and the inspector (TASK-024).",
+    "Parameter editing and charts (TASK-025). Leave room for them in the layout."
+  ],
+  "design_freedom": [
+    "Visual identity: colour palette, typography, light or dark appearance.",
+    "How the world is drawn: flat cells, textures, shading, how organisms and their traits are shown.",
+    "Layout of the window and where later controls and charts will live.",
+    "Extras such as a minimap, smooth zooming, map overlays or a day/season indicator."
+  ],
+  "screenshots": "`./evosim ui --screenshots DIR` writes `main.png` as defined in `docs/CONTRACT.md` section 2.",
   "phases": [
     "plan",
     "implement",

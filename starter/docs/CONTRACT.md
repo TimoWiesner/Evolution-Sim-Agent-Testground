@@ -53,9 +53,19 @@ Runs the configuration once per seed and writes `DIR/seed-<seed>.json` for each 
 ```
 evosim ui [--config FILE]
 evosim ui --smoke-test [--config FILE]
+evosim ui --screenshots DIR [--config FILE]
 ```
 
 Starts the user interface. With `--smoke-test` it must, without user input: start the real UI (on the display given by `DISPLAY`, or its local server for a browser UI), create a world, advance at least 10 ticks, render at least one frame, shut down, and exit 0 within 60 seconds.
+
+With `--screenshots DIR` it must, without user input: start the real UI in the same way, create a world, advance at least 100 ticks, write images of the interface into the existing directory `DIR`, shut down, and exit 0 within 120 seconds.
+
+- `DIR/main.png` is required: the complete main view as a user sees it, with the world visible, as a PNG of at least 1280×720 pixels.
+- Up to five further PNG files showing other views or states (for example charts or the inspector) are optional; their names are your choice.
+- The images must come from the real interface, not from a separate drawing routine.
+- Only `./evosim` has to support this option, `dist/evosim` does not. Anything it needs, such as a headless browser for a browser UI, is installed by `./setup.sh`.
+
+The benchmark publishes these images next to those of other agents.
 
 ## 3. Configuration
 
