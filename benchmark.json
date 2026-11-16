@@ -33,7 +33,7 @@
     "max_turns": null,
     "extra_args": [],
     "env": {},
-    "host_ports": []
+    "host_ports": [], "workers": 3
   },
   "profiles": {
     "claude-opus": { "cli": "claude", "model": "opus" },
@@ -47,7 +47,7 @@
       "cli": "opencode",
       "model": "llama.cpp/qwen3.6-35b-a3b",
       "phase_timeout_seconds": 7200,
-      "host_ports": [8080]
+      "host_ports": [8080], "workers": 1
     }
   }
 }

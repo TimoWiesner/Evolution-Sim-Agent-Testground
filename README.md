@@ -6,7 +6,7 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness is under active development. The parallel and subagent tracks are planned but not built yet.
+> Status: the harness is under active development. The sequential and parallel tracks are built; the subagent track is planned.
 
 Published results: [Evolution-Sim-Agent-Results](https://github.com/TimoWiesner/Evolution-Sim-Agent-Results).
 
@@ -47,6 +47,7 @@ A profile is a named combination of CLI, model and settings in `benchmark.json`.
 | `env` | Extra environment variables for the CLI process |
 | `host_ports` | Host loopback ports the container may reach, e.g. `[8080]` for a local model server |
 | `cpus`, `memory` | Optional container limits, e.g. `4` and `8g` |
+| `workers` | Parallel track: agents working at the same time (default 3; 1 for the local profile) |
 
 Local models are any OpenAI-compatible endpoint (llama.cpp, Ollama, LM Studio) registered as a provider in your opencode configuration; the profile names it as `provider/model`.
 
@@ -62,13 +63,14 @@ Run data is stored **outside this repository**, by default under `~/evo-runs` (`
   state.json        authoritative runner state
   report.json       progress, failure classes, tokens, cost, time
   workspace/        the agent's local Git repository (no remotes)
+  workers/TASK-*/   parallel track only: private checkout of each task in progress
   home/             the container's home directory; holds a copy of the CLI login, never publish it
   logs/*.jsonl      full raw CLI events (may contain sensitive text)
   handoff-archive/  handoffs from retried phases
   eval/             hidden test results and logs per completed task
 ```
 
-`--track` is `sequential` for now. `--run-id` defaults to `r1`; use another id to repeat a run.
+`--track` is `sequential` (default) or `parallel`. `--run-id` defaults to `r1`; use another id to repeat a run.
 
 ## Commands
 
@@ -90,9 +92,36 @@ python3 run.py unblock --profile local-qwen --task TASK-005 --phase implement --
 - `--refresh-login` copies your current host CLI login into the run again, for when the run's copy has expired.
 - `--no-container` runs the agent directly on the host instead of in the sandbox; `--allow-unsafe` then lets the CLI skip its permission prompts. Read [docs/SECURITY.md](docs/SECURITY.md) first. A run stays in the mode it started in.
 - `unblock` is an **operator intervention** and must be disclosed when comparing results. It keeps the code and Git history and resets the retry counter for one task.
+- `--workers N` sets the number of agents for a new parallel run; it cannot change later.
 - Ctrl+C: stop between phases if possible. An interrupted phase leaves `inflight.json`, which is reported on the next start; the phase is then repeated.
 
 Tasks are worked in a fixed order (started tasks first, then the lowest ready task ID), so every profile sees the same sequence. A failed phase is retried once; after that the task is `BLOCKED` and independent tasks continue. A failed review sends the task back to PLAN, up to three cycles.
+
+## Tracks
+
+| Track | How the 27 tasks are worked |
+|---|---|
+| `sequential` | One agent at a time, one task after the other. |
+| `parallel` | Up to N agents at the same time, each on a different task whose prerequisites are done. |
+
+```bash
+python3 run.py run --profile claude-sonnet --track parallel [--workers 3]
+```
+
+In the parallel track every task is developed in its own checkout, a local clone of the main line taken when the task starts. The task goes through the same PLAN, IMPLEMENT and REVIEW phases there. When its review passes, the harness merges it into the main workspace:
+
+- If Git can merge it alone, no agent is involved.
+- On a conflict, **one extra agent call** (a MERGE phase) has to resolve it in the main workspace. It is retried once like any phase; if conflict markers remain or the merge was abandoned, the main line is put back and the task is `BLOCKED`.
+- A task only counts as done, and unlocks the tasks that depend on it, once it is merged.
+
+The number of workers is fixed for a run and recorded in `run.json`. `compare` adds a parallel section: elapsed time, how many agents were busy on average, speed-up against the sequential run of the same profile, and the number of merges, conflicts and failed merges. Hidden evaluations run beside the workers and are not part of the elapsed time.
+
+Things to know when reading parallel results:
+
+- The task graph limits what can run side by side: at most two to four tasks are ready at the same time, and the first two tasks are strictly serial.
+- Checkouts do not share build output or installed project dependencies, so each task may repeat `./setup.sh`. All workers share one container, including its system packages.
+- Speed figures measured by the hidden suite during a run can be disturbed by agents working at the same time. Run `evaluate` once the run has finished for a clean final measurement.
+- With subscription logins, several agents share one rate limit.
 
 ## Layout
 

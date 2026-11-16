@@ -163,6 +163,17 @@ def run_readme(report, artifact, release_url, harness_url):
                   ' / '.join(core.fmt_count(report['reported_' + k]) for k in core.TOKEN_KINDS)],
                  ['Cost', core.fmt_cost(report['reported_total_cost_usd'])],
                  ['Isolation', report['isolation']]]), '']
+    if report['track'] == 'parallel':
+        lines += ['## Parallel work', '',
+                  f'Up to {report["workers"]} agents worked at the same time, each on its own task in a private checkout '
+                  'that was merged when its review passed.', '',
+                  core.table(['', ''], [
+                      ['Elapsed time (without hidden evaluations)', core.fmt_time(report['elapsed_seconds'])],
+                      ['Agents busy on average', report['parallelism'] if report['parallelism'] is not None else '—'],
+                      ['Merges', report['merges']],
+                      ['Merges with conflicts (resolved by the model)', f'{report["merge_conflicts"]} ({report["merge_conflict_files"]} files)'],
+                      ['Merges the model could not resolve', report['merges_failed']],
+                      ['Time spent resolving conflicts', core.fmt_time(report['merge_agent_seconds'])]]), '']
     lines += ['## Hidden test results', '']
     if ev:
         lines += [f'Scored by a private black-box suite the agent never saw, after {ev["label"]}: '

@@ -11,17 +11,19 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 
 BENCHMARK_VERSION = 1
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PHASES = ('plan', 'implement', 'review')
-TRACKS = ('sequential',)
+TRACKS = ('sequential','parallel')
 # Paths inside the agent container.
 CONTAINER_WS = '/workspace'
 CONTAINER_HOME = '/root'
 CONTAINER_CLI = '/opt/evo-cli'
+CONTAINER_WORKERS = '/workers'   # parallel track: one private checkout per task in progress
 # Login/config files (relative to $HOME) copied into a run's private container home.
 LOGIN_FILES = {
     'claude': ('.claude/.credentials.json',),
@@ -77,7 +79,7 @@ def fingerprint(profile):
 
 class Run:
     """One benchmark run: <runs_root>/<profile>/<track>/<run_id>/."""
-    def __init__(self, name, track='sequential', run_id='r1', cfg=None, container=False):
+    def __init__(self, name, track='sequential', run_id='r1', cfg=None, container=False, workers=None):
         if track not in TRACKS: raise RuntimeError(f'Unknown track {track!r}')
         if not re.fullmatch(r'[A-Za-z0-9._-]+', run_id): raise RuntimeError(f'Invalid run id {run_id!r}')
         self.cfg = cfg or config()
@@ -91,6 +93,21 @@ class Run:
         self.meta = self.base/'run.json'
         self.container = container
         self.home = self.base/'home'   # container $HOME; holds copied logins, never publish it
+        self.workers_dir = self.base/'workers'
+        # Number of agents working at the same time; fixed for the whole run.
+        self.workers = 1
+        if track == 'parallel':
+            stored = read(self.meta).get('workers') if self.meta.exists() else None
+            self.workers = int(workers or stored or self.profile.get('workers') or 1)
+            if self.workers < 1: raise RuntimeError('--workers must be at least 1')
+
+    def place(self, task, phase):
+        """Where a phase works: (host path, path inside the container).
+
+        Parallel tasks are developed in a private checkout and only merged into the workspace."""
+        if self.track == 'parallel' and phase != 'merge':
+            return self.workers_dir/task, f'{CONTAINER_WORKERS}/{task}'
+        return self.workspace, CONTAINER_WS
 
 def initial_state():
     return {'version':1,'tasks':{k:{'status':'PENDING','phase':'plan','cycle':1,'recovery':0,'history':[]} for k in specs()},'events':[],'interventions':[],'evaluations':[],'spent_seconds':0,'reported_cost_usd':0,'reported_tokens':0,'cost_complete':True,'tokens_complete':True}
@@ -121,7 +138,7 @@ def run_metadata(run):
     return {'benchmark_version':BENCHMARK_VERSION,'profile':run.name,'track':run.track,'run_id':run.run_id,
             'cli':run.cli,'model':run.profile['model'],'settings':run.profile,'fingerprint':fingerprint(run.profile),
             'cli_version':cli_version(run.profile['executable']),'harness_commit':harness_commit(),
-            'isolation':'container' if run.container else 'host',
+            'isolation':'container' if run.container else 'host','workers':run.workers,
             'container_image':image_id(run.cfg) if run.container else None,
             'host':host_info(),'created':now()}
 
@@ -134,6 +151,9 @@ def check_unchanged(run):
     mode = 'container' if run.container else 'host'
     if stored.get('isolation','host') != mode:
         raise RuntimeError(f'This run was started in {stored.get("isolation","host")} mode, not {mode} mode. '
+                           f'Start a new run with --run-id.')
+    if stored.get('workers',1) != run.workers:
+        raise RuntimeError(f'This run was started with {stored.get("workers",1)} worker(s), not {run.workers}. '
                            f'Start a new run with --run-id.')
 
 # --- container isolation -----------------------------------------------------
@@ -174,16 +194,17 @@ def container_create_argv(run):
             '--network',network_arg(p),
             '-v',f'{run.workspace}:{CONTAINER_WS}','-v',f'{run.home}:{CONTAINER_HOME}','-v',f'{src}:{target}:ro',
             '-e','IS_SANDBOX=1','-e',f'HOME={CONTAINER_HOME}','-w',CONTAINER_WS]
+    if run.track == 'parallel': argv += ['-v',f'{run.workers_dir}:{CONTAINER_WORKERS}']
     for k in ('cpus','memory'):
         v = p.get(k) or c.get(k)
         if v: argv += [f'--{k}',str(v)]
     return argv + [c['image'],'sleep','infinity']
 
-def container_exec_argv(run, argv, timeout):
+def container_exec_argv(run, argv, timeout, cwd=CONTAINER_WS):
     """Wrap an adapter command; `timeout` inside the container kills the whole agent process tree."""
     exe = cli_mount(run.profile)[2]
     env = [x for k,v in (run.profile.get('env') or {}).items() for x in ('-e',f'{k}={v}')]
-    return [runtime(run.cfg),'exec',*env,'-w',CONTAINER_WS,container_name(run),
+    return [runtime(run.cfg),'exec',*env,'-w',cwd,container_name(run),
             'timeout','-k','10',str(int(timeout)),exe,*argv[1:]]
 
 def copy_logins(run, refresh=False):
@@ -197,9 +218,15 @@ def copy_logins(run, refresh=False):
     if run.cli in LOGIN_REQUIRED and not found:
         raise RuntimeError(f'No {run.cli} login found on the host ({LOGIN_FILES[run.cli][0]}); log in with the CLI first.')
 
+CONTAINER_LOCK = threading.Lock()
+
 def ensure_container(run, refresh_login=False):
+    with CONTAINER_LOCK: _ensure_container(run, refresh_login)
+
+def _ensure_container(run, refresh_login):
     rt = runtime(run.cfg); name = container_name(run)
     run.home.mkdir(parents=True,exist_ok=True)
+    if run.track == 'parallel': run.workers_dir.mkdir(parents=True,exist_ok=True)
     copy_logins(run,refresh_login)
     if subprocess.run([rt,'container','exists',name]).returncode == 0:
         state = subprocess.run([rt,'inspect','-f','{{.State.Running}}',name],text=True,capture_output=True).stdout.strip()
@@ -376,7 +403,12 @@ def short_event(cli, line):
     if t=='error':return 'agent error'
     return None
 
-def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=None):
+STOP = threading.Event()   # set to end every running agent process (parallel track)
+
+class Interrupted(Exception):
+    pass
+
+def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=None,prefix=''):
     start=time.monotonic();out=[];timed_out=False
     if logfile:
         logfile=pathlib.Path(logfile);logfile.parent.mkdir(parents=True,exist_ok=True)
@@ -393,7 +425,7 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
     last_event=None
     with open(logfile,'w',encoding='utf-8') if logfile else open(os.devnull,'w') as log:
         while True:
-            if time.monotonic()-start>timeout:
+            if time.monotonic()-start>timeout or STOP.is_set():
                 timed_out=True
                 try:os.killpg(proc.pid,signal.SIGTERM)
                 except ProcessLookupError:pass
@@ -412,9 +444,10 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
             if live and agent:
                 msg=short_event(agent,line)
                 if msg and msg!=last_event:
-                    print('  • '+msg,flush=True);last_event=msg
+                    print(f'  • {prefix}{msg}',flush=True);last_event=msg
         proc.wait()
         proc.stdout.close()
+    if STOP.is_set():raise Interrupted()
     return {'exit_code':124 if timed_out else proc.returncode,'seconds':round(time.monotonic()-start,2),'output':''.join(out),'timeout':timed_out}
 
 # --- phases ------------------------------------------------------------------
@@ -441,12 +474,37 @@ SANDBOX_NOTE=('ENVIRONMENT: you are root inside a disposable Linux container (Ub
               'You may install what you need. System packages installed with apt may NOT persist into later phases: '
               'record every system dependency and its exact install command in docs/STATE.md and reinstall when missing. ')
 
-def prompt_for(task,phase,cycle,w=None,sandbox=False):
+PARALLEL_NOTE=('PARALLEL WORK: this workspace is your private checkout for this one task. Other agents are working on other '
+               'tasks at the same time in their own checkouts; you cannot see their unfinished work. When your task passes review, '
+               'your commits are merged into the main line. Keep changes focused on your task and avoid needless rewrites of shared '
+               'files, so the merge stays simple. Build output and installed project dependencies are not shared between checkouts; '
+               'run ./setup.sh here when something is missing. ')
+
+def merge_prompt(task,cycle,files,w,sandbox=False):
+    w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
+    hand=w/'tasks'/task/'handoffs'/f'merge-cycle{cycle}.json'
+    return (f'WORKSPACE ROOT (absolute): {w}\n'
+            + (SANDBOX_NOTE if sandbox else '') +
+            f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. Fresh context; no prior conversation. '
+            f'Task {task}, phase MERGE, cycle {cycle}. '
+            f'{task} was developed in parallel with other tasks and has passed its review. Git is now merging it into the main line '
+            f'in this workspace and stopped with conflicts in: {", ".join(files)}. '
+            f'Read AGENTS.md, docs/CONTRACT.md, docs/STATE.md, tasks/{task}/task.md and the handoffs of {task} and of the tasks '
+            f'whose changes collide with it (see `git status`, `git diff`, `git log --merge`). '
+            f'Resolve every conflict so that the work of BOTH sides is kept and works together; never drop one side to make the '
+            f'conflict disappear. Remove all conflict markers. Run ./setup.sh if needed and the test suite, and fix what the '
+            f'combination broke. Do not start new feature work. '
+            f'Do NOT run git commit, git merge --abort, git reset or git checkout of whole branches; the orchestrator concludes the merge. '
+            f'Before returning, write a VALID UTF-8 JSON handoff to this ABSOLUTE file path: {hand}. '
+            f'The handoff MUST include task_id, phase ("merge"), cycle (integer), summary, changed_files, '
+            f'decisions, tests, risks, next_steps, verdict ("N/A"), gaps. Write honest results, even on failure.')
+
+def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False):
     if w is None: w=pathlib.Path.cwd()
     w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
-            + (SANDBOX_NOTE if sandbox else '') +
+            + (SANDBOX_NOTE if sandbox else '') + (PARALLEL_NOTE if parallel else '') +
             f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. '
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
@@ -475,75 +533,254 @@ def error_class(r,ok,reason,integrity,check):
     if check['exit_code']!=0:return 'ACCEPTANCE_FAILURE'
     return None
 
-def phase_argv(run,task,phase,cycle,unsafe=False):
+def phase_argv(run,task,phase,cycle,unsafe=False,files=()):
     """Full command for one phase: the CLI adapter plus prompt, wrapped for the container if used."""
-    timeout=run.profile['phase_timeout_seconds']
+    timeout=run.profile['phase_timeout_seconds'];host,inside=run.place(task,phase)
+    w=inside if run.container else host
+    if phase=='merge':prompt=merge_prompt(task,cycle,files,w,sandbox=run.container)
+    else:prompt=prompt_for(task,phase,cycle,w,sandbox=run.container,parallel=run.track=='parallel')
     if run.container:
-        argv=adapter(run.profile,True)+[prompt_for(task,phase,cycle,CONTAINER_WS,sandbox=True)]
-        return container_exec_argv(run,argv,timeout)
-    return adapter(run.profile,unsafe)+[prompt_for(task,phase,cycle,run.workspace)]
+        return container_exec_argv(run,adapter(run.profile,True)+[prompt],timeout,inside)
+    return adapter(run.profile,unsafe)+[prompt]
 
-def execute_phase(run,state,task,unsafe=False,live=True):
-    cfg=run.cfg;w=run.workspace;b=run.base;profile=run.profile
-    ts=state['tasks'][task];phase=ts['phase'];cycle=ts['cycle']
-    label=f'{task}-{phase}-{cycle}-attempt{ts["recovery"]}'
+def agent_call(run,task,phase,cycle,label,unsafe=False,live=True,files=()):
+    """Run one fresh agent process for a phase and return the result of `cmd`."""
+    b=run.base;w=run.place(task,phase)[0];limit=run.profile['phase_timeout_seconds']
+    argv=phase_argv(run,task,phase,cycle,unsafe,files)
+    prefix=f'[{task}] ' if run.track=='parallel' else ''
+    if run.container:
+        # The in-container `timeout` enforces the limit (exit 124); the outer limit is only a backstop.
+        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,prefix=prefix)
+        if r['exit_code']==124:r['timeout']=True
+    else:
+        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=run.profile.get('env'),prefix=prefix)
+    return r
+
+def inflight_path(run,task):
+    return run.base/(f'inflight-{task}.json' if run.track=='parallel' else 'inflight.json')
+
+def archive_handoff(run,hand,label):
+    hand.parent.mkdir(parents=True,exist_ok=True)
+    if hand.exists():
+        archive=run.base/'handoff-archive'/f'{label}-{int(time.time())}.json'
+        archive.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(hand,archive)
+        hand.unlink()
+
+def restore_protected(w):
+    """Put benchmark-owned files back; the violation stays visible in the event and raw logs."""
+    for name in protected_manifest():
+        source=(ROOT/'skills'/name[7:]) if name.startswith('skills/') else ((ROOT/name) if name.startswith('tasks/') else ROOT/'starter'/name)
+        dest=w/('.agents/skills/'+name[7:] if name.startswith('skills/') else name)
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(source,dest)
+
+class NoLock:
+    def __enter__(self):return self
+    def __exit__(self,*exc):return False
+
+def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
+    """One PLAN, IMPLEMENT or REVIEW phase. `lock` guards the shared state when phases run in parallel."""
+    cfg=run.cfg;b=run.base;lock=lock or NoLock()
+    with lock:
+        ts=state['tasks'][task];phase=ts['phase'];cycle=ts['cycle'];recovery=ts['recovery']
+    w=run.place(task,phase)[0]
+    label=f'{task}-{phase}-{cycle}-attempt{recovery}'
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
-    argv=phase_argv(run,task,phase,cycle,unsafe)
     if run.container:ensure_container(run)
     ensure_local_git(w)
     ok,reason=protected_ok(w)
     if not ok:raise RuntimeError('Workspace already changed protected file before phase: '+reason)
-    hand.parent.mkdir(parents=True,exist_ok=True)
-    if hand.exists():
-        archive=b/'handoff-archive'/f'{label}-{int(time.time())}.json'
-        archive.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(hand,archive)
-        hand.unlink()
+    archive_handoff(run,hand,label)
     # checkpoint before any agent process, survives power loss
-    write(b/'inflight.json',{'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'started':now()})
+    write(inflight_path(run,task),{'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'started':now()})
     print(f'START {label} (cwd={w})',flush=True)
-    limit=profile['phase_timeout_seconds']
-    if run.container:
-        # The in-container `timeout` enforces the limit (exit 124); the outer limit is only a backstop.
-        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live)
-        if r['exit_code']==124:r['timeout']=True
-    else:
-        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=profile.get('env'))
-    hand_ok,reason=handoff_valid(hand,task,phase,cycle)
-    intact,integrity_error=protected_ok(w)
-    if not intact:reason='Protected benchmark spec modified: '+integrity_error
-    chk=external_checks(w,task,phase,cfg['benchmark_test_timeout_seconds']) if hand_ok and intact and r['exit_code']==0 else {'exit_code':1,'output':'not run'}
-    failure=error_class(r,hand_ok,reason,intact,chk)
-    u=usage(run.cli,r['output']);record_usage(state,u);state['spent_seconds']+=r['seconds']
-    ev={'task':task,'phase':phase,'cycle':cycle,'recovery':ts['recovery'],'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':chk['exit_code'],'external_check_tail':chk['output'][-1200:],'usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
-    ts['history'].append(ev);state['events'].append(ev)
-    # Always capture agent edits in local git, even for failure; crucial for recovery diagnosis.
-    ensure_local_git(w)
-    if not intact:
-        # Restore benchmark-owned files, preserving violation in event and raw logs.
-        for name in protected_manifest():
-            source=(ROOT/'skills'/name[7:]) if name.startswith('skills/') else ((ROOT/name) if name.startswith('tasks/') else ROOT/'starter'/name)
-            dest=w/('.agents/skills/'+name[7:] if name.startswith('skills/') else name)
-            dest.parent.mkdir(parents=True,exist_ok=True)
-            shutil.copy2(source,dest)
-    git(w,'add','-A')
-    git(w,'commit','--allow-empty','-qm',f'{task} {phase} cycle {cycle} {"PASS" if failure is None else failure}')
-    ev['commit']=git(w,'rev-parse','HEAD')
-    if failure:
-        if ts['recovery']<cfg['recovery_attempts']:
-            ts['recovery']+=1;print('RECOVERY pending',label,failure,reason,flush=True)
+    r=agent_call(run,task,phase,cycle,label,unsafe,live)
+    with lock:
+        hand_ok,reason=handoff_valid(hand,task,phase,cycle)
+        intact,integrity_error=protected_ok(w)
+        if not intact:reason='Protected benchmark spec modified: '+integrity_error
+        chk=external_checks(w,task,phase,cfg['benchmark_test_timeout_seconds']) if hand_ok and intact and r['exit_code']==0 else {'exit_code':1,'output':'not run'}
+        failure=error_class(r,hand_ok,reason,intact,chk)
+        u=usage(run.cli,r['output']);record_usage(state,u);state['spent_seconds']+=r['seconds']
+        ev={'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':chk['exit_code'],'external_check_tail':chk['output'][-1200:],'usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
+        ts['history'].append(ev);state['events'].append(ev)
+        # Always capture agent edits in local git, even for failure; crucial for recovery diagnosis.
+        ensure_local_git(w)
+        if not intact:restore_protected(w)
+        git(w,'add','-A')
+        git(w,'commit','--allow-empty','-qm',f'{task} {phase} cycle {cycle} {"PASS" if failure is None else failure}')
+        ev['commit']=git(w,'rev-parse','HEAD')
+        if failure:
+            if ts['recovery']<cfg['recovery_attempts']:
+                ts['recovery']+=1;print('RECOVERY pending',label,failure,reason,flush=True)
+            else:
+                ts['status']='BLOCKED';ts['blocked_reason']=f'{failure}: {reason or chk["output"][-250:] or r["exit_code"]}'
+                print('BLOCKED',label,ts['blocked_reason'],flush=True)
         else:
-            ts['status']='BLOCKED';ts['blocked_reason']=f'{failure}: {reason or chk["output"][-250:] or r["exit_code"]}'
-            print('BLOCKED',label,ts['blocked_reason'],flush=True)
-    else:
-        ts['recovery']=0;ts['status']='ACTIVE';ts.pop('blocked_reason',None)
-        if phase=='plan':ts['phase']='implement'
-        elif phase=='implement':ts['phase']='review'
-        else:
-            if read(hand)['verdict']=='PASS':ts['status']='DONE';ts['phase']='complete'
-            elif cycle<cfg['max_cycles']:ts['cycle']+=1;ts['phase']='plan'
-            else:ts['status']='BLOCKED';ts['blocked_reason']='REVIEW_GAPS: max cycles reached'
-        print('FINISHED',label, '=>',ts['status'],ts['phase'],flush=True)
+            ts['recovery']=0;ts['status']='ACTIVE';ts.pop('blocked_reason',None)
+            if phase=='plan':ts['phase']='implement'
+            elif phase=='implement':ts['phase']='review'
+            else:
+                if read(hand)['verdict']=='PASS':
+                    # A parallel task only counts as done once it is merged into the main line.
+                    if run.track=='parallel':ts['phase']='merge'
+                    else:ts['status']='DONE';ts['phase']='complete'
+                elif cycle<cfg['max_cycles']:ts['cycle']+=1;ts['phase']='plan'
+                else:ts['status']='BLOCKED';ts['blocked_reason']='REVIEW_GAPS: max cycles reached'
+            print('FINISHED',label, '=>',ts['status'],ts['phase'],flush=True)
     return True
+
+# --- parallel track ----------------------------------------------------------
+
+def start_worker(run,task,ts):
+    """Give a task its private checkout: a local clone of the main line as it is right now."""
+    d=run.workers_dir/task
+    if d.exists():return d
+    run.workers_dir.mkdir(parents=True,exist_ok=True)
+    tmp=d.with_name(d.name+'.tmp');shutil.rmtree(tmp,ignore_errors=True)
+    git(run.base,'clone','-q',str(run.workspace),str(tmp))
+    git(tmp,'remote','remove','origin')
+    git(tmp,'config','user.name',run.cfg['git_author_name'])
+    git(tmp,'config','user.email',run.cfg['git_author_email'])
+    os.replace(tmp,d)
+    ts['base_commit']=git(d,'rev-parse','HEAD')
+    return d
+
+def conflict_markers(w,files):
+    bad=[]
+    for f in files:
+        p=pathlib.Path(w)/f
+        if p.is_file() and re.search(r'^(<{7}|>{7}) ',p.read_text(encoding='utf-8',errors='replace'),re.M):bad.append(f)
+    return bad
+
+def reset_main(w,commit='HEAD'):
+    """Drop an unfinished merge and everything it left behind (ignored files such as build output stay)."""
+    subprocess.run(['git','merge','--abort'],cwd=w,capture_output=True)
+    git(w,'reset','-q','--hard',commit);git(w,'clean','-fdq')
+
+def execute_merge(run,state,task,unsafe=False,live=True,lock=None):
+    """Merge a reviewed task into the main line. Git does it alone when it can; on a conflict one
+    agent call has to resolve it, which is counted and timed like any other phase."""
+    cfg=run.cfg;w=run.workspace;src=run.workers_dir/task;lock=lock or NoLock()
+    with lock:
+        ts=state['tasks'][task];cycle=ts['cycle'];recovery=ts['recovery']
+    label=f'{task}-merge-{cycle}-attempt{recovery}'
+    hand=w/'tasks'/task/'handoffs'/f'merge-cycle{cycle}.json'
+    reset_main(w);before=git(w,'rev-parse','HEAD')
+    git(w,'fetch','-q',str(src),'HEAD');theirs=git(w,'rev-parse','FETCH_HEAD')
+    m=subprocess.run(['git','merge','--no-ff','--no-commit','FETCH_HEAD'],cwd=w,text=True,capture_output=True)
+    files=git(w,'diff','--name-only','--diff-filter=U').splitlines()
+    rec={'task':task,'base_commit':ts.get('base_commit'),'task_commit':theirs,'main_moved':ts.get('base_commit')!=before,
+         'conflict':bool(files),'conflict_files':files,'attempts':recovery+1}
+    failure=reason=None
+    if files:
+        print(f'MERGE {task}: conflict in {", ".join(files)}; asking the agent to resolve it',flush=True)
+        if run.container:ensure_container(run)
+        archive_handoff(run,hand,label)
+        write(inflight_path(run,task),{'task':task,'phase':'merge','cycle':cycle,'recovery':recovery,'started':now()})
+        r=agent_call(run,task,'merge',cycle,label,unsafe,live,files)
+    elif m.returncode:
+        failure='MERGE_ERROR';reason=(m.stderr or m.stdout)[-400:]
+    with lock:
+        if files:
+            hand_ok,reason=handoff_valid(hand,task,'merge',cycle)
+            intact,integrity_error=protected_ok(w)
+            if not intact:reason='Protected benchmark spec modified: '+integrity_error
+            left=conflict_markers(w,files) if hand_ok and intact else []
+            failure=error_class(r,hand_ok,reason,intact,{'exit_code':0})
+            if not failure and left:failure='MERGE_UNRESOLVED';reason='conflict markers left in '+', '.join(left)
+            u=usage(run.cli,r['output']);record_usage(state,u);state['spent_seconds']+=r['seconds']
+            ev={'task':task,'phase':'merge','cycle':cycle,'recovery':recovery,'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':None,'external_check_tail':'','usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
+            ts['history'].append(ev);state['events'].append(ev)
+        if not failure:
+            git(w,'add','-A')
+            git(w,'commit','--allow-empty','-qm',f'{task} merge'+(' (conflicts resolved by agent)' if files else ''))
+            # The agent must not have backed out of the merge instead of resolving it.
+            if subprocess.run(['git','merge-base','--is-ancestor',theirs,'HEAD'],cwd=w).returncode:
+                failure='MERGE_UNRESOLVED';reason='the merge was abandoned instead of resolved'
+                if files:ev['passed']=False;ev['failure_class']=failure;ev['handoff_error']=reason
+        if failure:
+            reset_main(w,before)
+            if ts['recovery']<cfg['recovery_attempts']:
+                ts['recovery']+=1;print('RECOVERY pending',label,failure,reason,flush=True);return True
+            ts['status']='BLOCKED';ts['blocked_reason']=f'{failure}: {reason}'
+            state.setdefault('merges',[]).append({**rec,'merged':False,'timestamp':now()})
+            print('BLOCKED',label,ts['blocked_reason'],flush=True);return True
+        commit=git(w,'rev-parse','HEAD')
+        if files:ev['commit']=commit
+        ts.update(status='DONE',phase='complete',recovery=0,merge_commit=commit);ts.pop('blocked_reason',None)
+        state.setdefault('merges',[]).append({**rec,'merged':True,'commit':commit,'timestamp':now()})
+        shutil.rmtree(src,ignore_errors=True)
+        print(f'MERGED {task}'+(' after conflict resolution' if files else ' without conflicts'),flush=True)
+    return True
+
+def parallel_jobs(state,running,slots):
+    """Which tasks get a free worker now. Fixed order, decided by the harness: merges first (one at a
+    time, they all write to the main line), then started tasks, then the lowest ready task IDs."""
+    tasks=state['tasks'];merging=any(tasks[k]['phase']=='merge' for k in running);out=[]
+    for k in sorted((k for k in ready(state) if k not in running),key=lambda k:(tasks[k]['phase']!='merge',tasks[k]['status']!='ACTIVE',k)):
+        if len(out)>=slots:break
+        if tasks[k]['phase']=='merge':
+            if merging:continue
+            merging=True
+        out.append(k)
+    return out
+
+def budget_reached(state,cfg):
+    if state['spent_seconds']>=cfg['max_run_seconds']:return 'time budget exceeded'
+    if cfg['max_cost_usd'] is not None and (not state['cost_complete'] or state['reported_cost_usd']>=cfg['max_cost_usd']):return 'cost budget reached/unknown'
+    if cfg['max_tokens'] is not None and (not state['tokens_complete'] or state['reported_tokens']>=cfg['max_tokens']):return 'token budget reached/unknown'
+    return None
+
+def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True):
+    """Keep up to `run.workers` agents busy. Every job is one phase or one merge of one task.
+
+    Hidden evaluations run beside the workers, one at a time, and never take a worker slot."""
+    from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
+    cfg=run.cfg;lock=threading.Lock();running={};n=0
+    began=time.monotonic();earlier=state.get('elapsed_seconds',0);state.setdefault('merges',[])
+    STOP.clear();reset_main(run.workspace)
+    for f in run.base.glob('inflight-*.json'):
+        print('WARNING: prior interrupted phase:',read(f));f.unlink()
+    def job(task):
+        with lock:
+            merge=state['tasks'][task]['phase']=='merge'
+            if not merge:start_worker(run,task,state['tasks'][task])
+        (execute_merge if merge else execute_phase)(run,state,task,unsafe,live,lock)
+        with lock:write(run.state,state)
+        inflight_path(run,task).unlink(missing_ok=True)
+    def score(task,commit,done):
+        if evaluate_run(run,state,task,commit,done) is None:print('NOTE: hidden evaluation skipped, evaluation repository not found',flush=True)
+        with lock:write(run.state,state)
+    pool=ThreadPoolExecutor(run.workers);scorer=ThreadPoolExecutor(1)
+    try:
+        while True:
+            with lock:
+                stop=budget_reached(state,cfg)
+                free=run.workers-len(running)
+                if max_phases is not None:free=min(free,max_phases-n)
+                new=[] if stop else parallel_jobs(state,running.values(),free)
+            for task in new:running[pool.submit(job,task)]=task
+            n+=len(new)
+            if not running:
+                if stop:print(stop)
+                break
+            for f in wait(running,return_when=FIRST_COMPLETED)[0]:
+                task=running.pop(f);f.result()
+                with lock:
+                    state['elapsed_seconds']=round(earlier+time.monotonic()-began,2)
+                    ts=state['tasks'][task]
+                    if ts['status']=='DONE' and not no_eval and eval_dir(cfg):
+                        done=[k for k,v in state['tasks'].items() if v['status']=='DONE']
+                        scorer.submit(score,task,ts['merge_commit'],done)
+                    write(run.state,state)
+    except BaseException:
+        STOP.set()
+        if run.container:stop_container(run)
+        pool.shutdown(wait=True,cancel_futures=True);scorer.shutdown(wait=False,cancel_futures=True)
+        raise
+    pool.shutdown();scorer.shutdown(wait=True)
+    with lock:write(run.state,state)
 
 def choose_ready(state):
     """Deterministic order: finish started tasks first, then the lowest ready task ID.
@@ -567,7 +804,15 @@ def summarize(meta,state):
     classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
     done=[t for t in tasks.values() if t['status']=='DONE']
     cost=total(events,'cost_usd')
-    return {'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
+    merges=state.get('merges',[]);spent=state['spent_seconds'];elapsed=state.get('elapsed_seconds',spent)
+    parallel={'workers':meta.get('workers',1),'elapsed_seconds':round(elapsed,2),
+              # Agent seconds per elapsed second: how many agents were busy on average.
+              'parallelism':round(spent/elapsed,2) if elapsed else None,
+              'merges':sum(m['merged'] for m in merges),'merge_conflicts':sum(m['conflict'] for m in merges),
+              'merge_conflict_files':sum(len(m['conflict_files']) for m in merges),
+              'merges_failed':sum(not m['merged'] for m in merges),
+              'merge_agent_seconds':round(sum(e.get('seconds',0) for e in events if e.get('phase')=='merge'),2)}
+    return {**parallel,'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
             'cli':meta['cli'],'cli_version':meta['cli_version'],'model':meta['model'],
             'reported_models':sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')}),
             'isolation':meta.get('isolation','host'),'harness_commit':meta['harness_commit'],'host':meta['host'],'created':meta['created'],
@@ -619,13 +864,13 @@ def evaluation_commands(cfg,name,image,product,out,ed,done):
           '--done',','.join(sorted(done)),'--prep','/out']
     return prep,test
 
-def evaluate_run(run,state,label,commit='HEAD'):
+def evaluate_run(run,state,label,commit='HEAD',done=None):
     """Score a committed workspace state with the hidden suite. The result is stored with the run
     and never shown to the agent. Returns the record, or None when no evaluation repository exists."""
     cfg=run.cfg;ed=eval_dir(cfg)
     if not ed:return None
     rt=runtime(cfg);t=cfg['eval']['timeout_seconds'];start=time.monotonic()
-    done=[k for k,v in state['tasks'].items() if v['status']=='DONE']
+    if done is None:done=[k for k,v in state['tasks'].items() if v['status']=='DONE']
     work=run.base/'eval'/label;shutil.rmtree(work,ignore_errors=True)
     product=work/'product';out=work/'out';product.mkdir(parents=True);out.mkdir()
     name='evo-eval-'+container_name(run)[4:]+'-'+label.lower();image=name+'-img'
@@ -710,6 +955,21 @@ def comparison_markdown(rows):
             [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
              +[r['evaluation']['metrics'].get('ticks_per_second','—')] for r in scored]))
+    par=[r for r in rows if r['track']=='parallel']
+    if par:
+        seq={}
+        for r in rows:
+            if r['track']=='sequential' and r['finished']:seq.setdefault(r['profile'],[]).append(r['wall_seconds_agent_calls'])
+        def speedup(r):
+            base=median(seq.get(r['profile'],[]))
+            return f"{base/r['elapsed_seconds']:.2f}×" if base and r['finished'] and r['elapsed_seconds'] else '—'
+        out+=['','## Parallel track','','Several agents work on independent tasks at the same time, each in a private checkout that is merged when its review passes. '
+              '"Elapsed" is wall-clock time of the run without the hidden evaluations; "Agent time" is the sum over all agent calls. '
+              '"Busy agents" is agent time divided by elapsed time. "Speed-up" compares elapsed time with the agent time of the finished sequential run(s) of the same profile. '
+              'A conflict is a merge Git could not do alone; the model then has to resolve it in one extra call, and a merge it cannot resolve blocks the task.','']
+        out.append(table(['Profile','Run','Workers','Elapsed','Agent time','Busy agents','Speed-up','Merges','Conflicts','Conflicting files','Failed merges','Conflict resolution time'],
+            [[r['profile'],r['run_id'],r['workers'],fmt_time(r['elapsed_seconds']),fmt_time(r['wall_seconds_agent_calls']),r['parallelism'] if r['parallelism'] is not None else '—',speedup(r),
+              r['merges'],r['merge_conflicts'],r['merge_conflict_files'],r['merges_failed'],fmt_time(r['merge_agent_seconds'])] for r in par]))
     out+=['','## Every run','']
     out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
         [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",r['status_counts']['BLOCKED'],
@@ -758,7 +1018,7 @@ def doctor(cfg):
     print('profiles:')
     for name in sorted(cfg['profiles']):
         p=resolve_profile(cfg,name)
-        print(f'  {name}: cli={p["cli"]} model={p["model"] or "(CLI default)"} phase_timeout={p["phase_timeout_seconds"]}s')
+        print(f'  {name}: cli={p["cli"]} model={p["model"] or "(CLI default)"} phase_timeout={p["phase_timeout_seconds"]}s parallel_workers={p.get("workers") or 1}')
 
 def main():
     cfg=config()
@@ -774,11 +1034,12 @@ def main():
             q.add_argument('--run-id',default='r1',help='distinguishes repeated runs of the same profile and track')
         if name in ('init','run'):
             q.add_argument('--no-container',action='store_true',help='run the agent directly on the host instead of in the sandbox container')
+            q.add_argument('--workers',type=int,help='parallel track: agents working at the same time (default: "workers" of the profile); fixed for the whole run')
         if name=='run':
             q.add_argument('--no-eval',action='store_true',help='skip the hidden evaluation after each completed task')
             q.add_argument('--refresh-login',action='store_true',help='copy the host CLI login into the run again')
             q.add_argument('--allow-unsafe',action='store_true',help='host mode only: let the CLI skip its permission prompts');q.add_argument('--dry-run',action='store_true');q.add_argument('--max-phases',type=int);q.add_argument('--quiet',action='store_true')
-        if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES);q.add_argument('--cycle',type=int)
+        if name=='unblock':q.add_argument('--task',required=True);q.add_argument('--phase',choices=PHASES+('merge',));q.add_argument('--cycle',type=int)
     a=p.parse_args()
     if a.action=='doctor':doctor(cfg);return
     if a.action=='build-image':sys.exit(build_image(cfg))
@@ -786,13 +1047,16 @@ def main():
     if a.action=='publish':
         from . import publish as pub
         pub.publish(cfg,a.dry_run);return
-    run=Run(a.profile,a.track,a.run_id,cfg,container=not getattr(a,'no_container',False))
+    run=Run(a.profile,a.track,a.run_id,cfg,container=not getattr(a,'no_container',False),workers=getattr(a,'workers',None))
     if a.action=='run' and a.dry_run:
         st=read(run.state) if run.state.exists() else initial_state()
-        task=choose_ready(st)
-        if task:
-            ts=st['tasks'][task];print('DRY RUN',task,ts['phase'],'cycle',ts['cycle']);print(' '.join(phase_argv(run,task,ts['phase'],ts['cycle'],a.allow_unsafe)))
-            if run.container:print('container:',' '.join(container_create_argv(run)))
+        tasks=parallel_jobs(st,(),run.workers) if run.track=='parallel' else [t for t in [choose_ready(st)] if t]
+        if run.track=='parallel':print('DRY RUN parallel track,',run.workers,'worker(s)')
+        for task in tasks:
+            ts=st['tasks'][task];print('DRY RUN',task,ts['phase'],'cycle',ts['cycle'])
+            if ts['phase']=='merge':print('git merge of the task checkout; an agent is called only on a conflict')
+            else:print(' '.join(phase_argv(run,task,ts['phase'],ts['cycle'],a.allow_unsafe)))
+        if tasks and run.container:print('container:',' '.join(container_create_argv(run)))
         return
     if a.action=='init':print('Workspace:',init(run));return
     if a.action=='report':report(run);return
@@ -820,15 +1084,20 @@ def main():
         if not shutil.which(run.profile['executable']):p.error('CLI missing')
         if run.container and a.refresh_login:copy_logins(run,True)
         ensure_local_git(w)
+        if run.track=='parallel':
+            st=read(run.state)
+            try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet)
+            finally:
+                if run.container:stop_container(run)
+            report(run);return
         if (b/'inflight.json').exists():
             print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
             (b/'inflight.json').unlink()
         st=read(run.state);n=0;n_warned=[]
         while True:
             if a.max_phases is not None and n>=a.max_phases:break
-            if st['spent_seconds']>=cfg['max_run_seconds']:print('time budget exceeded');break
-            if cfg['max_cost_usd'] is not None and (not st['cost_complete'] or st['reported_cost_usd']>=cfg['max_cost_usd']):print('cost budget reached/unknown');break
-            if cfg['max_tokens'] is not None and (not st['tokens_complete'] or st['reported_tokens']>=cfg['max_tokens']):print('token budget reached/unknown');break
+            stop=budget_reached(st,cfg)
+            if stop:print(stop);break
             task=choose_ready(st)
             if not task:break
             try:execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
