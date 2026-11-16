@@ -16,6 +16,8 @@ Three executable files at the workspace root. All are non-interactive, work from
 
 `./setup.sh` and `./build.sh` may use the network. `./evosim` and `dist/evosim` must work without network access.
 
+The benchmark container also provides a headless browser for browser-based UIs: the command `chromium` (Chromium 131, already set up to run as root in the container). For example, `chromium --headless --window-size=1280,720 --screenshot=out.png URL` renders a page to an image, and `chromium --headless --remote-debugging-port=9222 URL` allows it to be driven by a script. The environment variables `CHROME_BIN` and `PUPPETEER_EXECUTABLE_PATH` point to it. A virtual display is available through `xvfb-run` for desktop UIs.
+
 Tasks introduce these step by step; a command only has to work once the task that owns it is done.
 
 ## 2. Commands
@@ -63,7 +65,7 @@ With `--screenshots DIR` it must, without user input: start the real UI in the s
 - `DIR/main.png` is required: the complete main view as a user sees it, with the world visible, as a PNG of at least 1280×720 pixels.
 - Up to five further PNG files showing other views or states (for example charts or the inspector) are optional; their names are your choice.
 - The images must come from the real interface, not from a separate drawing routine.
-- Only `./evosim` has to support this option, `dist/evosim` does not. Anything it needs, such as a headless browser for a browser UI, is installed by `./setup.sh`.
+- Only `./evosim` has to support this option, `dist/evosim` does not. A browser UI can use the container's `chromium` (section 1); anything else it needs is installed by `./setup.sh`.
 
 The benchmark publishes these images next to those of other agents.
 

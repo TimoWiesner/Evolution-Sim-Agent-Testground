@@ -9,6 +9,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     RUSTUP_HOME=/opt/rust/rustup \
     CARGO_HOME=/opt/rust/cargo \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/browsers \
+    CHROME_BIN=/usr/local/bin/chromium \
+    PUPPETEER_EXECUTABLE_PATH=/usr/local/bin/chromium \
     PATH=/opt/rust/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,6 +27,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --profile minimal --default-toolchain stable --component clippy,rustfmt \
     && chmod -R a+rwX /opt/rust
+
+# Headless Chromium for browser UIs (smoke test and screenshots). Ubuntu 24.04 only ships Chromium
+# as a snap, which does not work in a container, so Playwright's build is used. `chromium` is a
+# wrapper that adds --no-sandbox, which Chromium needs when it runs as root in a container.
+RUN npx -y playwright@1.49.1 install --with-deps chromium \
+    && chrome="$(find /opt/browsers -type f -name chrome | head -n 1)" && test -x "$chrome" \
+    && printf '#!/bin/sh\nexec "%s" --no-sandbox "$@"\n' "$chrome" > /usr/local/bin/chromium \
+    && chmod 755 /usr/local/bin/chromium && chmod -R a+rX /opt/browsers \
+    && rm -rf /root/.npm /var/lib/apt/lists/*
 
 WORKDIR /workspace
 CMD ["sleep", "infinity"]

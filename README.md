@@ -152,7 +152,7 @@ Codex runs without `--ephemeral` in this track, because its subagents need a sto
 - `harness/publish.py`: packaging and publishing of finished runs.
 - `harness_tests/`: unit tests and an end-to-end test with a fake agent.
 - `acceptance/`: operator-owned baseline checks.
-- `container/Containerfile`: the agent sandbox image (Ubuntu 24.04, Python, Rust, Node, build tools).
+- `container/Containerfile`: the agent sandbox image (Ubuntu 24.04, Python, Rust, Node, build tools, headless Chromium and a virtual display).
 - `docs/`: [method](docs/BENCHMARK.md), [engineering notes](docs/HARNESS.md), [security](docs/SECURITY.md).
 
 ## Interface contract
