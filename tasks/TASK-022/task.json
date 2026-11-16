@@ -1,0 +1,23 @@
+{
+  "id": "TASK-022",
+  "title": "Savegames and checkpoints",
+  "dependencies": [
+    "TASK-005",
+    "TASK-007",
+    "TASK-017",
+    "TASK-019"
+  ],
+  "objective": "Serialize complete organisms, genome, world, clock, RNG and climate for restoration.",
+  "acceptance_criteria": [
+    "Uninterrupted vs checkpoint-resume statistical consistency",
+    "versioning & invalid-file behavior."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

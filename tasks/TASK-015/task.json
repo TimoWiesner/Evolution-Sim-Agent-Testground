@@ -1,0 +1,20 @@
+{
+  "id": "TASK-015",
+  "title": "Carnivore hunting and predation",
+  "dependencies": [
+    "TASK-013",
+    "TASK-014"
+  ],
+  "objective": "Carnivores pursue and consume herbivores with strength, defense, chance and risk tradeoffs.",
+  "acceptance_criteria": [
+    "Prey killed once, prey escape possible, energy transfer test."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

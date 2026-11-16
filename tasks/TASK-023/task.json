@@ -1,0 +1,21 @@
+{
+  "id": "TASK-023",
+  "title": "UI shell, world renderer",
+  "dependencies": [
+    "TASK-006",
+    "TASK-013",
+    "TASK-019"
+  ],
+  "objective": "Agent-choice desktop/web UI showing climate cells and differentiated organisms with pan and zoom.",
+  "acceptance_criteria": [
+    "Launch instructions, inspectable viewport, 1k entities usable."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

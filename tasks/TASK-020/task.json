@@ -1,0 +1,23 @@
+{
+  "id": "TASK-020",
+  "title": "Metrics and evolution analytics",
+  "dependencies": [
+    "TASK-017",
+    "TASK-018",
+    "TASK-019"
+  ],
+  "objective": "Track timeseries population, births/deaths, diversity, genotype means/distributions and generations.",
+  "acceptance_criteria": [
+    "Metric schema tests",
+    "metrics reflect state",
+    "sample export."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

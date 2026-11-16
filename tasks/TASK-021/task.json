@@ -1,0 +1,20 @@
+{
+  "id": "TASK-021",
+  "title": "Batch runner and export",
+  "dependencies": [
+    "TASK-019",
+    "TASK-020"
+  ],
+  "objective": "Sweep parameters and seeds; JSON/CSV aggregation and comparison.",
+  "acceptance_criteria": [
+    "At least 2x2 matrix fixture, per-run metadata and reproducible aggregate."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

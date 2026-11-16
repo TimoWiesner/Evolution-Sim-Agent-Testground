@@ -1,0 +1,14 @@
+{
+  "assessor": "",
+  "date": "",
+  "scores": {
+    "modularity": null,
+    "readability": null,
+    "simulation": null,
+    "genetics": null,
+    "ui": null,
+    "reproducibility": null
+  },
+  "evidence": [],
+  "notes": ""
+}

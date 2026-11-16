@@ -1,0 +1,21 @@
+{
+  "id": "TASK-003",
+  "title": "Typed configuration and presets",
+  "dependencies": [
+    "TASK-002"
+  ],
+  "objective": "Define validated simulation config, seed, dimensions, traits, species parameters and presets.",
+  "acceptance_criteria": [
+    "Malformed configs rejected",
+    "JSON/TOML/YAML roundtrip",
+    "preset fixtures."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

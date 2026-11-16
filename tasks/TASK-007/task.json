@@ -1,0 +1,21 @@
+{
+  "id": "TASK-007",
+  "title": "Seasons and stochastic weather",
+  "dependencies": [
+    "TASK-006"
+  ],
+  "objective": "Add seasons, temporal temperature and precipitation variation, seed-based weather.",
+  "acceptance_criteria": [
+    "Season periodicity tests",
+    "water/heat constraints",
+    "reproducibility checks."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

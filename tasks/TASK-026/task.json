@@ -1,0 +1,23 @@
+{
+  "id": "TASK-026",
+  "title": "Performance optimization and profiling",
+  "dependencies": [
+    "TASK-010",
+    "TASK-018",
+    "TASK-019",
+    "TASK-021"
+  ],
+  "objective": "Measure ticks/sec on specified 2k+ entity setup and optimize without behavior regressions.",
+  "acceptance_criteria": [
+    "Report hardware, seed, warmup, N ticks",
+    ">=100 ticks/sec target, test and caveats."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

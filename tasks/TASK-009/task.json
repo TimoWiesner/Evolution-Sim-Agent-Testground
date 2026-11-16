@@ -1,0 +1,22 @@
+{
+  "id": "TASK-009",
+  "title": "DNA inheritance and mutation",
+  "dependencies": [
+    "TASK-001",
+    "TASK-008"
+  ],
+  "objective": "Implement agent-decided genotype, crossing, trait expression, mutation.",
+  "acceptance_criteria": [
+    "Trait bounds",
+    "mutation/no-mutation",
+    "parent-offspring inheritance tests."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

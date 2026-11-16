@@ -1,0 +1,23 @@
+{
+  "id": "TASK-027",
+  "title": "Long-run reliability and delivery",
+  "dependencies": [
+    "TASK-018",
+    "TASK-021",
+    "TASK-022",
+    "TASK-025",
+    "TASK-026"
+  ],
+  "objective": "Property tests, 10k+-tick scenarios, regression suite, docs, runnable end-to-end demo and final self-audit.",
+  "acceptance_criteria": [
+    "Run logs, checked edge cases, UI+headless instructions, outstanding limitations clearly listed."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "TASK-024",
+  "title": "UI run controls and inspection",
+  "dependencies": [
+    "TASK-020",
+    "TASK-022",
+    "TASK-023"
+  ],
+  "objective": "Wire pause/resume/step/reset/speed and entity inspector with genome, traits, energy and species.",
+  "acceptance_criteria": [
+    "Single-step advances exactly one tick",
+    "inspect correct ID",
+    "speed nonnegative."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

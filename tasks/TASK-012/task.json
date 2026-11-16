@@ -1,0 +1,22 @@
+{
+  "id": "TASK-012",
+  "title": "Plant reproduction and dispersal",
+  "dependencies": [
+    "TASK-009",
+    "TASK-011"
+  ],
+  "objective": "Mutating plant lineages reproducing and spreading, including optional pollination as designed.",
+  "acceptance_criteria": [
+    "Seed spread under wrap",
+    "reproduction resource costs",
+    "lineage metadata."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

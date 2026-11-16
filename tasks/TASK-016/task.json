@@ -1,0 +1,25 @@
+{
+  "id": "TASK-016",
+  "title": "Animal reproduction",
+  "dependencies": [
+    "TASK-009",
+    "TASK-013",
+    "TASK-014",
+    "TASK-015"
+  ],
+  "objective": "Two compatible parents, sexual DNA crossover, fertility, energy costs, offspring.",
+  "acceptance_criteria": [
+    "No self mating",
+    "two-parent ancestry",
+    "inherited mutation",
+    "gestation/cooldown semantics."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

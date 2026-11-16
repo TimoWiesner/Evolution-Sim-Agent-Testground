@@ -1,0 +1,21 @@
+{
+  "id": "TASK-002",
+  "title": "Project bootstrap and quality gates",
+  "dependencies": [
+    "TASK-001"
+  ],
+  "objective": "Create executable skeleton, development scripts, dependency manifest and baseline tests for chosen stack.",
+  "acceptance_criteria": [
+    "Clean install/build documented",
+    "CLI help works",
+    "tests run in CI-like command."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

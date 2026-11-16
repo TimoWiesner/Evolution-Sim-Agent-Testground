@@ -1,0 +1,25 @@
+{
+  "id": "TASK-018",
+  "title": "Extinction and ecology integration",
+  "dependencies": [
+    "TASK-012",
+    "TASK-014",
+    "TASK-015",
+    "TASK-016",
+    "TASK-017"
+  ],
+  "objective": "Integrated food-chain loop without artificial repopulation; allow natural extinctions.",
+  "acceptance_criteria": [
+    "Plants->herbivores->carnivores scenarios",
+    "starvation/extinction",
+    "no magic reseed."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

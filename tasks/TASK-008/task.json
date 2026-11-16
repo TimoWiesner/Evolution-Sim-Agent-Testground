@@ -1,0 +1,19 @@
+{
+  "id": "TASK-008",
+  "title": "Entity trait and lifecycle model",
+  "dependencies": [
+    "TASK-005"
+  ],
+  "objective": "Define organisms, IDs, age, health, energy, traits, death causes.",
+  "acceptance_criteria": [
+    "Health bounds, lifecycle invariants, simultaneous births/deaths tests."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

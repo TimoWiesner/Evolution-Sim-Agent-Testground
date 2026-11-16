@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "max_cycles": 3,
+  "recovery_attempts": 1,
+  "phase_timeout_seconds": 1800,
+  "max_run_seconds": 172800,
+  "max_cost_usd": null,
+  "max_tokens": null,
+  "benchmark_test_timeout_seconds": 180,
+  "git_author_name": "Evolution Benchmark",
+  "git_author_email": "benchmark@localhost",
+  "agents": {
+    "claude": {
+      "executable": "claude",
+      "extra_args": []
+    },
+    "codex": {
+      "executable": "codex",
+      "extra_args": []
+    },
+    "opencode": {
+      "executable": "opencode",
+      "extra_args": []
+    }
+  }
+}

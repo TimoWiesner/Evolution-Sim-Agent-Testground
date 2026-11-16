@@ -1,0 +1,19 @@
+{
+  "id": "TASK-001",
+  "title": "Architecture decision records",
+  "dependencies": [],
+  "objective": "Evaluate Python versus Rust, UI choice, toroidal neighbor search and DNA design; establish module/API boundaries and three ADRs.",
+  "acceptance_criteria": [
+    "ADRs compare >=2 alternatives each",
+    "document reproducibility strategy",
+    "architecture ledger updated."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

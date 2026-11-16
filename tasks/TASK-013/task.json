@@ -1,0 +1,20 @@
+{
+  "id": "TASK-013",
+  "title": "Animal sensing and movement",
+  "dependencies": [
+    "TASK-008",
+    "TASK-010"
+  ],
+  "objective": "Herbivore and carnivore vision, movement, speed, energy costs and toroidal seeking.",
+  "acceptance_criteria": [
+    "Movement capped by traits, sensing near borders, occupancy semantics."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

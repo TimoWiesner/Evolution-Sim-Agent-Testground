@@ -1,0 +1,21 @@
+{
+  "id": "TASK-017",
+  "title": "Species detection and phylogeny",
+  "dependencies": [
+    "TASK-009",
+    "TASK-012",
+    "TASK-016"
+  ],
+  "objective": "Agent-designed genetic-distance species assignment for all organism groups and lineage tracking.",
+  "acceptance_criteria": [
+    "Deterministic naming/IDs, threshold edge cases, divergence tests."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+target/
+node_modules/
+*.pyc
+reports/
+outputs/

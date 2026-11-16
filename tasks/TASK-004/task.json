@@ -1,0 +1,21 @@
+{
+  "id": "TASK-004",
+  "title": "Grid coordinates and toroidal topology",
+  "dependencies": [
+    "TASK-002"
+  ],
+  "objective": "Implement cell positions, neighbor distances and wrap-aware routing.",
+  "acceptance_criteria": [
+    "Border tests for all four edges",
+    "negative and multiwrap coordinates",
+    "rectangular maps."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

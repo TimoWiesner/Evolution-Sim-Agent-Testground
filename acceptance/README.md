@@ -1,0 +1,2 @@
+# External evaluation
+Reference policy and checks are outside agent workspace. The provided `checks.py` validates handoffs, task file protection (via git), and project setup; it cannot certify full simulation correctness before code exists. Add evaluator-owned black-box acceptance scripts for app/CLI after architecture selection, without exposing them to agents. `manual-review.example.json` defines repeatable assessor rubric.

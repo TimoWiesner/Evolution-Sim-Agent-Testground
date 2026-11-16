@@ -1,0 +1,20 @@
+{
+  "id": "TASK-014",
+  "title": "Herbivore feeding and behavior",
+  "dependencies": [
+    "TASK-011",
+    "TASK-013"
+  ],
+  "objective": "Herbivores detect and eat plants; genetically influenced movement/risk decisions.",
+  "acceptance_criteria": [
+    "No remote feeding, finite food intake, energy and climate consequences."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

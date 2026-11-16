@@ -1,0 +1,22 @@
+{
+  "id": "TASK-019",
+  "title": "Headless simulation CLI",
+  "dependencies": [
+    "TASK-003",
+    "TASK-018"
+  ],
+  "objective": "Single config/seed/tick runner with exit status and machine-readable output.",
+  "acceptance_criteria": [
+    "No display requirements",
+    "documented CLI invocation",
+    "deterministic result schema."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

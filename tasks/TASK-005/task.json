@@ -1,0 +1,22 @@
+{
+  "id": "TASK-005",
+  "title": "Clock, RNG and tick scheduler",
+  "dependencies": [
+    "TASK-003",
+    "TASK-004"
+  ],
+  "objective": "Provide isolated simulation state and reproducible tick/order/event pipeline.",
+  "acceptance_criteria": [
+    "Seed repeated-run trace test",
+    "stable tie-breaking",
+    "no UI dependency."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

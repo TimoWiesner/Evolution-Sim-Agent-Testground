@@ -1,0 +1,22 @@
+{
+  "id": "TASK-006",
+  "title": "Climate latitudes and biomes",
+  "dependencies": [
+    "TASK-004",
+    "TASK-005"
+  ],
+  "objective": "Implement continuous latitudinal zones (polar/tundra/temperate/savanna/desert/tropic) on torus.",
+  "acceptance_criteria": [
+    "Seam continuity tests",
+    "inspectable biome map",
+    "zone temperature/rain."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

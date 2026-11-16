@@ -1,0 +1,21 @@
+{
+  "id": "TASK-010",
+  "title": "Spatial search implementation",
+  "dependencies": [
+    "TASK-001",
+    "TASK-004",
+    "TASK-008"
+  ],
+  "objective": "Implement agent-chosen performant radius search and move/update index.",
+  "acceptance_criteria": [
+    "Wrap-crossing correctness, stale-removal checks, brute-force comparison."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

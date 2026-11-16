@@ -1,0 +1,24 @@
+{
+  "id": "TASK-025",
+  "title": "UI scenarios, presets and charts",
+  "dependencies": [
+    "TASK-003",
+    "TASK-020",
+    "TASK-021",
+    "TASK-024"
+  ],
+  "objective": "UI initial parameter editing, presets, config import/export and charts for genetics & diversity.",
+  "acceptance_criteria": [
+    "Roundtrip config",
+    "series and genotype plots",
+    "validation error presentation."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}

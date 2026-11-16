@@ -1,0 +1,21 @@
+{
+  "id": "TASK-011",
+  "title": "Plant resources and growth",
+  "dependencies": [
+    "TASK-006",
+    "TASK-008",
+    "TASK-009"
+  ],
+  "objective": "Plant nutrient/bioenergy system with climate-modulated growth, competition and mortality.",
+  "acceptance_criteria": [
+    "Biomass conservation policy, arid/cold comparison, plant aging tests."
+  ],
+  "phases": [
+    "plan",
+    "implement",
+    "review"
+  ],
+  "max_cycles": 3,
+  "status": "PENDING",
+  "owner": "orchestrator"
+}
