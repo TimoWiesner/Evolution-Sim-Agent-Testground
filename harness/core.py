@@ -274,9 +274,33 @@ def git(w,*args,timeout=60):
     if p.returncode: raise RuntimeError(f'git {args}: {p.stderr[-1000:]} {p.stdout[-500:]}')
     return p.stdout.strip()
 
+GIT_SLOW = 900   # staging and committing a large tree can take minutes
+
 def ensure_local_git(w):
-    remotes = git(w,'remote')
-    if remotes: raise RuntimeError(f'Remotes forbidden in workspace: {remotes}')
+    """The workspace never has a Git remote. One added by an agent is removed and reported."""
+    removed = git(w,'remote').split()
+    for name in removed: git(w,'remote','remove',name)
+    return [f'removed git remote {name}' for name in removed]
+
+def unlock_git(w):
+    """Remove lock files a killed Git process left behind. Only called while no agent works in `w`."""
+    found = []
+    for name in ('index.lock','HEAD.lock'):
+        f = pathlib.Path(w)/'.git'/name
+        if f.exists(): f.unlink(); found.append(f'removed stale .git/{name}')
+    return found
+
+def repair_checkout(w):
+    """Undo what an interrupted or misbehaving phase can leave behind, so that a run can always go on.
+    Returns the list of repairs; it is stored with the next event of the task."""
+    done = unlock_git(w) + ensure_local_git(w)
+    ok, where = protected_ok(w)
+    if not ok:
+        restore_protected(w); done.append(f'restored protected file {pathlib.Path(where).relative_to(w)}')
+        ok, where = protected_ok(w)
+        if not ok: raise RuntimeError('Workspace holds a task specification the benchmark does not know: '+where)
+    for line in done: print('REPAIR:',line,flush=True)
+    return done
 
 def init(run):
     w = run.workspace
@@ -592,7 +616,11 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
         q.put(None)
     reader_thread=threading.Thread(target=reader,daemon=True);reader_thread.start()
     last_event=None
+    def kill():
+        try:os.killpg(proc.pid,signal.SIGKILL)
+        except ProcessLookupError:pass
     with open(logfile,'w',encoding='utf-8') if logfile else open(os.devnull,'w') as log:
+      try:
         while True:
             if watch and time.monotonic()-checked>=30:
                 checked=time.monotonic();aborted=watch()
@@ -616,8 +644,11 @@ def cmd(argv,cwd,timeout=30,stdin=None,logfile=None,agent=None,live=False,env=No
                 msg=short_event(agent,line)
                 if msg and msg!=last_event:
                     print(f'  • {prefix}{msg}',flush=True);last_event=msg
-        proc.wait()
-        proc.stdout.close()
+      except BaseException:
+        # Ctrl+C or a termination signal: the agent process must not outlive the harness.
+        kill();raise
+      proc.wait()
+      proc.stdout.close()
     if STOP.is_set():raise Interrupted()
     return {'exit_code':124 if timed_out else (1 if aborted else proc.returncode),'seconds':round(time.monotonic()-start,2),'output':''.join(out),'timeout':timed_out,'aborted':aborted}
 
@@ -767,9 +798,7 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     label=f'{task}-{phase}-{cycle}-attempt{recovery}'
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     if run.container:ensure_container(run)
-    ensure_local_git(w)
-    ok,reason=protected_ok(w)
-    if not ok:raise RuntimeError('Workspace already changed protected file before phase: '+reason)
+    repairs=repair_checkout(w)
     archive_handoff(run,hand,label)
     # checkpoint before any agent process, survives power loss
     write(inflight_path(run,task),{'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'started':now()})
@@ -791,11 +820,16 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
         ev={'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':chk['exit_code'],'external_check_tail':chk['output'][-1200:],'usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
         ts['history'].append(ev);state['events'].append(ev)
         # Always capture agent edits in local git, even for failure; crucial for recovery diagnosis.
-        ensure_local_git(w)
+        repairs+=unlock_git(w)+ensure_local_git(w)
+        if repairs:ev['repairs']=repairs
         if not intact:restore_protected(w)
-        git(w,'add','-A')
-        git(w,'commit','--allow-empty','-qm',f'{task} {phase} cycle {cycle} {"PASS" if failure is None else failure}')
-        ev['commit']=git(w,'rev-parse','HEAD')
+        try:
+            git(w,'add','-A',timeout=GIT_SLOW)
+            git(w,'commit','--allow-empty','-qm',f'{task} {phase} cycle {cycle} {"PASS" if failure is None else failure}',timeout=GIT_SLOW)
+            ev['commit']=git(w,'rev-parse','HEAD')
+        except (RuntimeError,subprocess.TimeoutExpired) as e:
+            # The files stay in the workspace and go into the next commit; the run must not end here.
+            ev['commit']=None;ev['commit_error']=str(e)[:300];print('WARNING: phase commit failed:',ev['commit_error'],flush=True)
         if failure:
             if ts['recovery']<cfg['recovery_attempts']:
                 ts['recovery']+=1;print('RECOVERY pending',label,failure,reason,flush=True)
@@ -852,8 +886,12 @@ def execute_merge(run,state,task,unsafe=False,live=True,lock=None):
         ts=state['tasks'][task];cycle=ts['cycle'];recovery=ts['recovery']
     label=f'{task}-merge-{cycle}-attempt{recovery}'
     hand=w/'tasks'/task/'handoffs'/f'merge-cycle{cycle}.json'
-    reset_main(w);before=git(w,'rev-parse','HEAD')
-    git(w,'fetch','-q',str(src),'HEAD');theirs=git(w,'rev-parse','FETCH_HEAD')
+    unlock_git(w);reset_main(w);before=git(w,'rev-parse','HEAD')
+    unlock_git(src)
+    if git(src,'status','--porcelain',timeout=GIT_SLOW):
+        # A phase commit that failed earlier must not cost the task its last changes.
+        git(src,'add','-A',timeout=GIT_SLOW);git(src,'commit','-qm',f'{task} changes not committed before',timeout=GIT_SLOW)
+    git(w,'fetch','-q',str(src),'HEAD',timeout=GIT_SLOW);theirs=git(w,'rev-parse','FETCH_HEAD')
     m=subprocess.run(['git','merge','--no-ff','--no-commit','FETCH_HEAD'],cwd=w,text=True,capture_output=True)
     files=git(w,'diff','--name-only','--diff-filter=U').splitlines()
     rec={'task':task,'base_commit':ts.get('base_commit'),'task_commit':theirs,'main_moved':ts.get('base_commit')!=before,
@@ -881,8 +919,8 @@ def execute_merge(run,state,task,unsafe=False,live=True,lock=None):
             ev={'task':task,'phase':'merge','cycle':cycle,'recovery':recovery,'exit_code':r['exit_code'],'seconds':r['seconds'],'handoff_valid':hand_ok,'handoff_error':reason,'external_check_exit':None,'external_check_tail':'','usage':u,'passed':failure is None,'failure_class':failure,'timestamp':now()}
             ts['history'].append(ev);state['events'].append(ev)
         if not failure:
-            git(w,'add','-A')
-            git(w,'commit','--allow-empty','-qm',f'{task} merge'+(' (conflicts resolved by agent)' if files else ''))
+            unlock_git(w);git(w,'add','-A',timeout=GIT_SLOW)
+            git(w,'commit','--allow-empty','-qm',f'{task} merge'+(' (conflicts resolved by agent)' if files else ''),timeout=GIT_SLOW)
             # The agent must not have backed out of the merge instead of resolving it.
             if subprocess.run(['git','merge-base','--is-ancestor',theirs,'HEAD'],cwd=w).returncode:
                 failure='MERGE_UNRESOLVED';reason='the merge was abandoned instead of resolved'
@@ -927,7 +965,7 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,
     from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
     cfg=run.cfg;lock=threading.Lock();running={};n=0
     began=time.monotonic();earlier=state.get('elapsed_seconds',0);state.setdefault('merges',[])
-    STOP.clear();reset_main(run.workspace);begin_invocation(state)
+    STOP.clear();unlock_git(run.workspace);reset_main(run.workspace);begin_invocation(state)
     for f in run.base.glob('inflight-*.json'):
         print('WARNING: prior interrupted phase:',read(f));f.unlink()
     def job(task):
@@ -1235,8 +1273,13 @@ def doctor(cfg):
         p=resolve_profile(cfg,name)
         print(f'  {name}: cli={p["cli"]} model={p["model"] or "(CLI default)"} phase_timeout={p["phase_timeout_seconds"]}s parallel_workers={p.get("workers") or 1}')
 
+def terminate(signum,frame):
+    raise KeyboardInterrupt(f'signal {signum}')
+
 def main():
     cfg=config()
+    # A closed terminal or a shutdown ends the run like Ctrl+C, so the agent is stopped with it.
+    for sig in (signal.SIGTERM,signal.SIGHUP):signal.signal(sig,terminate)
     p=argparse.ArgumentParser(description=f'Evolution Agent Benchmark v{BENCHMARK_VERSION}')
     sub=p.add_subparsers(dest='action',required=True)
     for name in ('doctor','build-image','compare','publish','init','run','evaluate','package','report','unblock'):
@@ -1286,20 +1329,24 @@ def main():
             st=read(run.state);evaluate_run(run,st,'final');write(run.state,st)
         report(run);return
     if a.action=='unblock':
-        st=read(run.state);ts=st['tasks'][a.task]
-        if ts['status']!='BLOCKED':raise RuntimeError('Task is not BLOCKED')
-        ts['status']='ACTIVE';ts['recovery']=0;ts.pop('blocked_reason',None)
-        if a.phase:ts['phase']=a.phase
-        if a.cycle:ts['cycle']=a.cycle
-        st.setdefault('interventions',[]).append({'action':'unblock','task':a.task,'phase':ts['phase'],'cycle':ts['cycle'],'timestamp':now()})
-        write(run.state,st);print('Unblocked',a.task,ts['phase'],ts['cycle']);return
+        with lock_run(run):
+            st=read(run.state);ts=st['tasks'][a.task]
+            if ts['status']!='BLOCKED':raise RuntimeError('Task is not BLOCKED')
+            ts['status']='ACTIVE';ts['recovery']=0;ts.pop('blocked_reason',None)
+            if a.phase:ts['phase']=a.phase
+            if a.cycle:ts['cycle']=a.cycle
+            st.setdefault('interventions',[]).append({'action':'unblock','task':a.task,'phase':ts['phase'],'cycle':ts['cycle'],'timestamp':now()})
+            write(run.state,st);print('Unblocked',a.task,ts['phase'],ts['cycle'])
+        return
     with lock_run(run):
         b=run.base;w=run.workspace
         if not run.state.exists():init(run)
         check_unchanged(run)
         if not shutil.which(run.profile['executable']):p.error('CLI missing')
-        if run.container and a.refresh_login:copy_logins(run,True)
-        ensure_local_git(w)
+        if run.container:
+            # An agent left over from a run that was killed must be gone before a new one starts.
+            stop_container(run)
+            if a.refresh_login:copy_logins(run,True)
         if run.track=='parallel':
             st=read(run.state)
             try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet,a.stop_on_limit)

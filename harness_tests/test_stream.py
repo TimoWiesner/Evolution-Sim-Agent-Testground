@@ -21,5 +21,18 @@ class StreamTests(unittest.TestCase):
    with patch.object(core.time,'monotonic',lambda:next(clock)):
     r=cmd([sys.executable,'-c','import time;time.sleep(30)'],tmp,10**6,watch=lambda:'server gone')
    self.assertEqual((r['aborted'],r['timeout'],r['exit_code']),('server gone',False,1))
+ def test_termination_signal_ends_the_agent_process(self):
+  import subprocess,os,time
+  root=str(pathlib.Path(__file__).resolve().parents[1])
+  with tempfile.TemporaryDirectory() as tmp:
+   pid=pathlib.Path(tmp)/'pid'
+   child=f'import os,time,pathlib;pathlib.Path({str(pid)!r}).write_text(str(os.getpid()));time.sleep(60)'
+   code=('import sys,signal,os,threading;sys.path.insert(0,%r);from harness import core\n'
+         'signal.signal(signal.SIGTERM,core.terminate);threading.Timer(1.5,os.kill,(os.getpid(),signal.SIGTERM)).start()\n'
+         'try:core.cmd([sys.executable,"-c",%r],".",100)\nexcept KeyboardInterrupt:print("stopped")')%(root,child)
+   p=subprocess.run([sys.executable,'-c',code],capture_output=True,text=True,timeout=30)
+   self.assertIn('stopped',p.stdout,p.stderr)
+   time.sleep(.3)
+   with self.assertRaises(ProcessLookupError):os.kill(int(pid.read_text()),0)
 
 if __name__=='__main__':unittest.main()

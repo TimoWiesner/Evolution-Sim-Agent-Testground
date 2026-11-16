@@ -59,8 +59,18 @@ class Integration(Base):
  def test_changed_contract_is_restored(self):
   c=self.w/'docs/CONTRACT.md';original=c.read_text();c.write_text('weakened')
   self.assertFalse(core.protected_ok(self.w)[0])
-  self.s['tasks']['TASK-001']['phase']='plan'
-  with self.assertRaises(RuntimeError):self.phase()
+  (self.w/'.git/index.lock').write_text('');core.git(self.w,'remote','add','origin','https://example.invalid/x.git')
+  self.assertTrue(self.phase())
+  self.assertEqual(c.read_text(),original);self.assertEqual(core.git(self.w,'remote'),'')
+  ev=self.s['events'][0];self.assertEqual(len(ev['repairs']),3);self.assertTrue(ev['passed'] and ev['commit'])
+ def test_failed_commit_does_not_end_the_run(self):
+  real=core.git
+  def broken(w,*args,**k):
+   if args[0]=='commit':raise RuntimeError('disk full')
+   return real(w,*args,**k)
+  with patch.object(core,'git',broken):self.assertTrue(self.phase())
+  ev=self.s['events'][0];self.assertIsNone(ev['commit']);self.assertIn('disk full',ev['commit_error'])
+  self.assertTrue(self.phase());self.assertTrue(self.s['events'][1]['commit'])
  def test_missing_handoff_recovery_and_block(self):
   with patch.dict(os.environ,{'FAKE_MISSING':'1'}):
    self.phase()
