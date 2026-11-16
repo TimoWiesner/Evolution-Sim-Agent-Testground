@@ -130,6 +130,28 @@ class Integration(Base):
   self.assertIsNone(core.infra_failure('codex',r(early,step,step,step),worked))
   self.assertEqual(core.infra_failure('codex',r(step,early),worked)['kind'],'outage')
   self.assertEqual(core.infra_failure('opencode',{'output':'','aborted':'server gone'},worked)['kind'],'server')
+ def test_repeated_call_keeps_every_log(self):
+  with patch.dict(os.environ,{'FAKE_OUTAGE':'1','FAKE_MISSING':'1'}):self.phase()
+  self.s['paused_until']=None;self.phase()
+  self.assertEqual(sorted(p.name for p in (self.run_.base/'logs').iterdir()),['TASK-001-plan-1-attempt0.jsonl','TASK-001-plan-1-attempt0.try2.jsonl'])
+ def test_interruption_is_recorded(self):
+  core.write(self.run_.base/'inflight.json',{'task':'TASK-001','phase':'plan'})
+  core.note_interruptions(self.run_,self.s)
+  self.assertEqual(self.s['interruptions'][0]['task'],'TASK-001');self.assertFalse((self.run_.base/'inflight.json').exists())
+  self.assertEqual(core.summarize(core.read(self.run_.meta),self.s)['interruptions'],1)
+ def test_damaged_state_falls_back_to_the_previous_one(self):
+  core.write(self.run_.state,{'n':1});core.write(self.run_.state,{'n':2})
+  self.run_.state.write_text('{"n":')
+  self.assertEqual(core.read_state(self.run_),{'n':1})
+ def test_full_disk_stops_before_the_call(self):
+  self.run_.cfg['min_free_disk_gb']=10**9
+  self.assertFalse(self.phase());self.assertIn('GB free',self.s['halt']);self.assertEqual(self.s['events'],[])
+ def test_done_tasks_without_a_score_are_found(self):
+  for _ in core.PHASES:self.phase()
+  todo=core.missing_evaluations(self.s)
+  self.assertEqual([(t,d) for t,c,d in todo],[('TASK-001',['TASK-001'])]);self.assertEqual(todo[0][1],self.s['events'][-1]['commit'])
+  self.s['evaluations']=[{'label':'TASK-001','error':'interrupted'}];self.assertEqual(len(core.missing_evaluations(self.s)),1)
+  self.s['evaluations']=[{'label':'TASK-001','passed':1}];self.assertEqual(core.missing_evaluations(self.s),[])
  def test_generated_handoff_is_not_protected(self):
   hand=self.w/'tasks/TASK-001/handoffs/plan-cycle1.md'
   hand.parent.mkdir(exist_ok=True);hand.write_text('notes')

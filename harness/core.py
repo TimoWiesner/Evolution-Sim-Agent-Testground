@@ -41,8 +41,20 @@ def write(path, obj):
     p = pathlib.Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_name(p.name + '.tmp')
-    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(obj, indent=2, ensure_ascii=False) + '\n')
+        f.flush(); os.fsync(f.fileno())   # a power cut must not leave an empty file
+    if p.name == 'state.json' and p.exists(): shutil.copy2(p, p.with_name('state.json.bak'))
     os.replace(tmp, p)
+
+def read_state(run):
+    """The run's state; when the file is damaged, the copy from before the last write is used."""
+    try: return read(run.state)
+    except ValueError:
+        backup = run.state.with_name('state.json.bak')
+        if not backup.exists(): raise
+        print('WARNING: state.json is damaged; continuing from state.json.bak (the last phase may be repeated).', flush=True)
+        return read(backup)
 
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -152,6 +164,11 @@ def check_unchanged(run):
     if stored.get('isolation','host') != mode:
         raise RuntimeError(f'This run was started in {stored.get("isolation","host")} mode, not {mode} mode. '
                            f'Start a new run with --run-id.')
+    current = cli_version(run.profile['executable'])
+    if current and current != (stored.get('cli_versions') or [stored.get('cli_version')])[-1]:
+        print(f'WARNING: the {run.cli} CLI is now {current}; this run started with {stored.get("cli_version")}. Recorded in run.json.', flush=True)
+        stored['cli_versions'] = (stored.get('cli_versions') or [stored.get('cli_version')]) + [current]
+        write(run.meta, stored)
     if stored.get('workers',1) != run.workers:
         raise RuntimeError(f'This run was started with {stored.get("workers",1)} worker(s), not {run.workers}. '
                            f'Start a new run with --run-id.')
@@ -220,8 +237,12 @@ def copy_logins(run, refresh=False):
 
 CONTAINER_LOCK = threading.Lock()
 
-def ensure_container(run, refresh_login=False):
-    with CONTAINER_LOCK: _ensure_container(run, refresh_login)
+def ensure_container(run, refresh_login=False, fresh=False):
+    """`fresh` restarts a running container first, so nothing a previous phase started is still running.
+    Files and installed packages are kept."""
+    with CONTAINER_LOCK:
+        if fresh: stop_container(run)
+        _ensure_container(run, refresh_login)
 
 def _ensure_container(run, refresh_login):
     rt = runtime(run.cfg); name = container_name(run)
@@ -238,7 +259,7 @@ def _ensure_container(run, refresh_login):
     if p.returncode: raise RuntimeError(f'Could not start container: {p.stderr[-800:]}')
 
 def stop_container(run):
-    subprocess.run([runtime(run.cfg),'stop','-t','2',container_name(run)],capture_output=True)
+    subprocess.run([runtime(run.cfg),'stop','-t','0',container_name(run)],capture_output=True)
 
 def build_image(cfg):
     return subprocess.run([runtime(cfg),'build','-t',cfg['container']['image'],'-f',str(ROOT/'container'/'Containerfile'),str(ROOT/'container')]).returncode
@@ -557,6 +578,40 @@ def refused(run,state,task,phase,cycle,label,r,hand_ok):
     if info:note_infra(run,state,task,phase,cycle,info,label,r,u);return True
     return False
 
+def note_interruptions(run,state):
+    """Phases that were running when the harness was killed: they are repeated, and the fact is kept."""
+    for f in sorted(run.base.glob('inflight*.json')):
+        try:info=read(f)
+        except ValueError:info={}
+        print('WARNING: prior interrupted phase:',info,flush=True)
+        state.setdefault('interruptions',[]).append({**info,'noticed':now()})
+        f.unlink()
+
+def finished_at(state,task):
+    merged=[m['timestamp'] for m in state.get('merges',[]) if m['task']==task and m.get('merged')]
+    hist=state['tasks'][task]['history']
+    return merged[-1] if merged else (hist[-1]['timestamp'] if hist else '')
+
+def missing_evaluations(state):
+    """Done tasks without a hidden-test result (the run was interrupted, or the evaluation failed), oldest first.
+    Each entry is (task, commit to score, tasks that were done at that moment)."""
+    have={e['label'] for e in state.get('evaluations',[]) if 'error' not in e};out=[]
+    done=sorted((k for k,t in state['tasks'].items() if t['status']=='DONE'),key=lambda k:(finished_at(state,k),k))
+    for i,k in enumerate(done):
+        t=state['tasks'][k];commit=t.get('merge_commit') or next((e.get('commit') for e in reversed(t['history']) if e.get('commit')),None)
+        if k not in have and commit:out.append((k,commit,done[:i+1]))
+    return out
+
+def catch_up_evaluations(run,state):
+    todo=missing_evaluations(state)
+    if not todo or not eval_dir(run.cfg):return
+    print(f'Scoring {len(todo)} finished task(s) that have no hidden-test result yet.',flush=True)
+    for task,commit,done in todo:
+        evaluate_run(run,state,task,commit,done)
+        # Keep the list in the order in which the tasks were finished; the last entry is the run's current score.
+        state['evaluations'].sort(key=lambda e:(e.get('done_tasks',0),e['label']=='final'))
+        write(run.state,state)
+
 def begin_invocation(state):
     """A fresh start of `run`: the operator has looked at it, so earlier stops and outage waits are over."""
     state.pop('halt',None);clear_streaks(state)
@@ -751,20 +806,26 @@ def phase_argv(run,task,phase,cycle,unsafe=False,files=()):
         return container_exec_argv(run,adapter(run.profile,True,sub)+[prompt],timeout,inside)
     return adapter(run.profile,unsafe,sub)+[prompt]
 
+def log_file(run,label):
+    """A repeated call (after a limit, an outage or an interruption) gets its own log; none is overwritten."""
+    f=run.base/'logs'/f'{label}.jsonl';n=1
+    while f.exists():n+=1;f=run.base/'logs'/f'{label}.try{n}.jsonl'
+    return f
+
 def agent_call(run,task,phase,cycle,label,unsafe=False,live=True,files=()):
     """Run one fresh agent process for a phase and return the result of `cmd`."""
     b=run.base;w=run.place(task,phase)[0];limit=run.profile['phase_timeout_seconds']
-    argv=phase_argv(run,task,phase,cycle,unsafe,files)
+    argv=phase_argv(run,task,phase,cycle,unsafe,files);log=log_file(run,label)
     prefix=f'[{task}] ' if run.track=='parallel' else '';watch=server_watch(run.profile)
     if run.container:
         # The in-container `timeout` enforces the limit (exit 124); the outer limit is only a backstop.
-        r=cmd(argv,b,limit+60,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,prefix=prefix,watch=watch)
+        r=cmd(argv,b,limit+60,logfile=log,agent=run.cli,live=live,prefix=prefix,watch=watch)
         if r['exit_code']==124:r['timeout']=True
         if r['aborted']:
             # Ending `podman exec` does not end the agent inside the container.
             subprocess.run([runtime(run.cfg),'exec',container_name(run),'pkill','-KILL','-f',f'WORKSPACE ROOT \\(absolute\\): {run.place(task,phase)[1]}\\b'],capture_output=True)
     else:
-        r=cmd(argv,w,limit,logfile=b/'logs'/f'{label}.jsonl',agent=run.cli,live=live,env=run.profile.get('env'),prefix=prefix,watch=watch)
+        r=cmd(argv,w,limit,logfile=log,agent=run.cli,live=live,env=run.profile.get('env'),prefix=prefix,watch=watch)
     return r
 
 def inflight_path(run,task):
@@ -797,7 +858,11 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     w=run.place(task,phase)[0]
     label=f'{task}-{phase}-{cycle}-attempt{recovery}'
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
-    if run.container:ensure_container(run)
+    with lock:
+        free=shutil.disk_usage(run.base).free/2**30;need=cfg.get('min_free_disk_gb',10)
+        if free<need:halt(state,f'only {free:.1f} GB free on the disk of {run.root} (minimum {need} GB). Free some space, then start the same command again.');return False
+    # Parallel workers share the container, so only the other tracks can start each phase with a clean one.
+    if run.container:ensure_container(run,fresh=run.track!='parallel')
     repairs=repair_checkout(w)
     archive_handoff(run,hand,label)
     # checkpoint before any agent process, survives power loss
@@ -966,8 +1031,8 @@ def run_parallel(run,state,max_phases=None,no_eval=False,unsafe=False,live=True,
     cfg=run.cfg;lock=threading.Lock();running={};n=0
     began=time.monotonic();earlier=state.get('elapsed_seconds',0);state.setdefault('merges',[])
     STOP.clear();unlock_git(run.workspace);reset_main(run.workspace);begin_invocation(state)
-    for f in run.base.glob('inflight-*.json'):
-        print('WARNING: prior interrupted phase:',read(f));f.unlink()
+    note_interruptions(run,state)
+    if not no_eval:catch_up_evaluations(run,state)
     def job(task):
         with lock:
             merge=state['tasks'][task]['phase']=='merge'
@@ -1050,6 +1115,7 @@ def summarize(meta,state):
               'infra_failures':len(state.get('infra_failures',[])),'infra_wait_seconds':state.get('infra_wait_seconds',0),
               'uncounted_calls':state.get('uncounted',{}).get('calls',0),'uncounted_seconds':state.get('uncounted',{}).get('seconds',0),
               'uncounted_tokens':state.get('uncounted',{}).get('tokens',0),
+              'interruptions':len(state.get('interruptions',[])),'cli_versions':meta.get('cli_versions') or [meta['cli_version']],
               'phases_delegated':sum(bool(e['usage'].get('delegated')) for e in events),
               'subagents_started':None if any(e['usage'].get('subagents') is None for e in events) else sum(e['usage']['subagents'] for e in events)}
     return {**parallel,'benchmark_version':meta['benchmark_version'],'profile':meta['profile'],'track':meta['track'],'run_id':meta['run_id'],
@@ -1238,6 +1304,8 @@ def comparison_markdown(rows):
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
     if any(r.get('rate_limit_hits') for r in rows):notes.append('Some runs were paused by a provider usage limit; refused calls are repeated and not counted as failures or agent time.')
     if any(r.get('infra_failures') for r in rows):notes.append('Some runs met outages (connection, provider, login or local model server); those calls are repeated and not counted as failures or agent time.')
+    if any(r.get('interruptions') for r in rows):notes.append('Some runs were interrupted and resumed; the interrupted phases were repeated from the start.')
+    if any(len(r.get('cli_versions') or [])>1 for r in rows):notes.append('In some runs the agent CLI was updated between two starts; see `cli_versions` in comparison.json.')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
     if notes:out+=['','## Notes','']+['- '+n for n in notes]
     return '\n'.join(out)+'\n'
@@ -1348,15 +1416,13 @@ def main():
             stop_container(run)
             if a.refresh_login:copy_logins(run,True)
         if run.track=='parallel':
-            st=read(run.state)
+            st=read_state(run)
             try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet,a.stop_on_limit)
             finally:
                 if run.container:stop_container(run)
             report(run);return
-        if (b/'inflight.json').exists():
-            print('WARNING: prior interrupted phase:',read(b/'inflight.json'))
-            (b/'inflight.json').unlink()
-        st=read(run.state);n=0;n_warned=[];begin_invocation(st)
+        st=read_state(run);n=0;n_warned=[];begin_invocation(st);note_interruptions(run,st)
+        if not a.no_eval:catch_up_evaluations(run,st)
         while True:
             if a.max_phases is not None and n>=a.max_phases:break
             stop=budget_reached(st,cfg)

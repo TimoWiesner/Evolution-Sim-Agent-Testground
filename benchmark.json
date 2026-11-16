@@ -10,13 +10,14 @@
   "max_cost_usd": null,
   "max_tokens": null,
   "benchmark_test_timeout_seconds": 180,
+  "min_free_disk_gb": 10,
   "git_author_name": "Evolution Benchmark",
   "git_author_email": "benchmark@localhost",
   "container": {
     "runtime": "podman",
     "image": "evo-bench:1",
     "cpus": null,
-    "memory": null
+    "memory": "16g"
   },
   "eval": {
     "path": "../Evolution-Sim-Agent-Eval",
