@@ -99,6 +99,9 @@ class RunnerTests(unittest.TestCase):
    if ui:
     self.assertIn('--screenshots',s['screenshots'])
     for c in s['design_freedom']:self.assertIn(c,md)
+   eco=t in ('TASK-011','TASK-012','TASK-014','TASK-015','TASK-016')
+   self.assertEqual('ecology_ideas' in s,eco,t);self.assertEqual('## Ecology ideas' in md,eco,t)
+   for c in s.get('ecology_ideas',[]):self.assertIn(c,md,t)
    self.assertNotIn('Python versus Rust',md)
  def test_evaluation_keeps_tests_away_from_the_network(self):
   from harness import core

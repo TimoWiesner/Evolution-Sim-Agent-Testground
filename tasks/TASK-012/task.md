@@ -15,6 +15,13 @@ The review passes only if every point is met and shown by a test or a recorded c
 - No offspring appears where there is no room or no resources for it.
 - Plants only come from plants: a world with zero plants stays at zero. A test proves it.
 
+## Ecology ideas
+These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-028).
+
+- A seed bank or dormant seeds in the soil that sprout when a cell is free and conditions are good, so grazed-out areas recover.
+- Dispersal over several cells, so empty regions are recolonised from neighbouring patches.
+- Reproduction that depends on local crowding and resources, not on a fixed rate.
+
 ## Your decisions
 Decide these yourself and write down what you chose and why.
 

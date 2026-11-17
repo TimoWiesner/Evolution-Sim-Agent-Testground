@@ -16,6 +16,13 @@ The review passes only if every point is met and shown by a test or a recorded c
 - The fertility trait influences the chance or the number of offspring.
 - Test: a single animal on its own never produces offspring.
 
+## Ecology ideas
+These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-028).
+
+- A minimum energy surplus for mating, so animals reproduce only when food is plentiful.
+- Larger litters or shorter cooldowns only in good conditions, smaller ones when energy is low.
+- Maturity ages and lifespans that keep generations overlapping instead of rising and dying together.
+
 ## Your decisions
 Decide these yourself and write down what you chose and why.
 

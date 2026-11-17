@@ -186,6 +186,8 @@ All 27 task files have the same sections, so that weaker models are not left gue
 
 The three UI tasks (23 to 25) add two sections. "Must have" is a functional baseline that a small model can reach: world view, controls, inspector, parameter editing, charts. "Design freedom" hands the look and feel to the agent, with ideas but no requirements, and can never fail a task. "Screenshots" asks the product to render its own interface to PNG files; this is scored by one hidden check and published, but does not block the task.
 
+The five mechanism tasks for plants and animals (11, 12, 14, 15, 16) add an "Ecology ideas" section: mechanisms that keep a food chain going without forced anti-extinction, such as regenerating resources, satiation or refuges for prey. Like design freedom, they are suggestions and can never fail a task.
+
 The technology is open as well: any language or framework that runs in the sandbox image.
 
 ## What is and is not measured today

@@ -23,6 +23,11 @@
     "Reproduction and spreading (TASK-012).",
     "Being eaten (TASK-014)."
   ],
+  "ecology_ideas": [
+    "Cell resources (water, nutrients or a single 'fertility' value) that are used up by growth and regenerate slowly up to a cap set by the climate: this gives logistic growth, so plants stop at a carrying capacity instead of exploding or vanishing.",
+    "Growth that slows as a cell gets crowded, so dense patches level off.",
+    "Plants keeping a reserve (roots) that survives grazing, so a grazed plant can regrow."
+  ],
   "phases": [
     "plan",
     "implement",

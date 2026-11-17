@@ -20,6 +20,11 @@
   "out_of_scope": [
     "Species (TASK-017)."
   ],
+  "ecology_ideas": [
+    "A seed bank or dormant seeds in the soil that sprout when a cell is free and conditions are good, so grazed-out areas recover.",
+    "Dispersal over several cells, so empty regions are recolonised from neighbouring patches.",
+    "Reproduction that depends on local crowding and resources, not on a fixed rate."
+  ],
   "phases": [
     "plan",
     "implement",

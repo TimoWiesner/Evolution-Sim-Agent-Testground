@@ -21,6 +21,12 @@
     "Being hunted (TASK-015).",
     "Reproduction (TASK-016)."
   ],
+  "ecology_ideas": [
+    "Satiation: a full herbivore stops eating, so it does not strip a cell bare.",
+    "Eating only part of a plant per bite, leaving enough for it to regrow.",
+    "Leaving depleted cells and moving towards better ones, which spreads grazing pressure.",
+    "Reproduction only from a real energy surplus, so births follow the food supply with a delay rather than running ahead of it."
+  ],
   "phases": [
     "plan",
     "implement",

@@ -20,6 +20,12 @@
   "out_of_scope": [
     "Reproduction (TASK-016)."
   ],
+  "ecology_ideas": [
+    "A handling time after a kill (eating, resting), which limits how many herbivores one carnivore can take.",
+    "Hunting success that drops when prey is scarce or hidden, so rare prey is not hunted to the last animal.",
+    "Cover or refuges for herbivores (for example dense vegetation or some climate zones) where attacks are harder.",
+    "Competition or territories among carnivores, so their density is limited by space as well as by food."
+  ],
   "phases": [
     "plan",
     "implement",
