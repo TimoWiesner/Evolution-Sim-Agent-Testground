@@ -183,7 +183,7 @@ def run_readme(report, artifact, release_url, harness_url):
                  ['Track', report['track']],
                  ['Started', report['created'][:10]],
                  ['State', 'finished' if report['finished'] else 'in progress'],
-                 ['Tasks done', f'{c["DONE"]} of {report["tasks_total"]} ({c["BLOCKED"]} blocked)'],
+                 ['Tasks done', f'{c["DONE"]} of {report["tasks_total"]} ({core.fmt_blocked(report)} blocked)'],
                  ['Passed review in first cycle', core.fmt_pct(report['first_cycle_pass_ratio'])],
                  ['Phases attempted / failed', f'{report["phases_attempted"]} / {report["phases_failed"]}'],
                  ['Operator interventions', report['operator_interventions']],
@@ -211,7 +211,8 @@ def run_readme(report, artifact, release_url, harness_url):
                       ['Time spent resolving conflicts', core.fmt_time(report['merge_agent_seconds'])]]), '']
     lines += ['## Hidden test results', '']
     if ev:
-        lines += [f'Scored by a private black-box suite the agent never saw, after {ev["label"]}: '
+        when = 'at the end of the run, including the work on blocked tasks' if ev['label'] == 'final' else f'after {ev["label"]}'
+        lines += [f'Scored by a private black-box suite the agent never saw, {when}: '
                   f'**{ev["passed"]} of {ev["total"]} checks passed**.', '',
                   core.table(['Category', 'Passed', 'Checks'],
                              [[core.label(k), v['passed'], v['total']] for k, v in ev['categories'].items()]), '']

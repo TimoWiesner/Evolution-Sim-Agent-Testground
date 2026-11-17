@@ -2,7 +2,7 @@ import json, pathlib, tempfile, unittest
 from harness import core, publish
 
 REPORT={'profile':'p','track':'sequential','run_id':'r1','model':'m','reported_models':['m-1'],'cli':'codex','cli_version':'codex 1',
- 'created':'2026-11-16T10:00:00','finished':True,'tasks_total':27,'status_counts':{'PENDING':0,'ACTIVE':0,'DONE':25,'BLOCKED':2},
+ 'created':'2026-11-16T10:00:00','finished':True,'tasks_total':27,'status_counts':{'PENDING':0,'ACTIVE':0,'DONE':25,'BLOCKED':2},'blocked_review_gaps':1,'blocked_errors':1,
  'first_cycle_pass_ratio':0.8,'phases_attempted':90,'phases_failed':4,'operator_interventions':0,'wall_seconds_agent_calls':7300,
  'reported_input_tokens':1000,'reported_cached_input_tokens':None,'reported_output_tokens':500,'reported_total_tokens':None,
  'reported_total_cost_usd':None,'isolation':'container','completed_ratio':0.926,'failure_classes':{},'harness_commit':'abc1234','host':{},
@@ -27,7 +27,7 @@ class PublishTests(unittest.TestCase):
   art={'build_ok':True,'self_contained':False,'self_contained_detail':'exit status 127','asset':'evosim-p.tar.gz','sha256':'ab','size_bytes':2500000}
   md=publish.run_readme(REPORT,art,'https://example/rel','https://example/harness')
   self.assertIn('**30 of 41 checks passed**',md);self.assertIn('**not** self-contained',md)
-  self.assertIn('| Cost | — |',md);self.assertIn('120.5 ticks per second',md);self.assertIn('fixed world 42 (50%)',md);self.assertIn('demo scenario no demo',md)
+  self.assertIn('| Cost | — |',md);self.assertIn('120.5 ticks per second',md);self.assertIn('fixed world 42 (50%)',md);self.assertIn('25 of 27 (2 (1 review, 1 error) blocked)',md);self.assertIn('demo scenario no demo',md)
   md=publish.run_readme({**REPORT,'evaluation':None},{**art,'build_ok':False},None,None)
   self.assertIn('not scored',md);self.assertIn('No executable',md)
  def test_screenshots_are_filtered_and_shown(self):

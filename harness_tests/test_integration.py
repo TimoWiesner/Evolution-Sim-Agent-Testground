@@ -216,6 +216,23 @@ class Integration(Base):
   self.assertIn('| sequential | fake | fake/model-a | 2 |',md)
   self.assertTrue((self.run_.root/'comparison.json').exists())
   self.assertIsNone(core.total([{'usage':{'tokens':None}},{'usage':{'tokens':5}}],'tokens'))
+ def test_final_evaluation_scores_blocked_work(self):
+  for t in self.s['tasks'].values():t['status']='DONE'
+  self.s['tasks']['TASK-027'].update(status='BLOCKED',blocked_reason='REVIEW_GAPS: max cycles reached')
+  self.s['tasks']['TASK-026'].update(status='BLOCKED',blocked_reason='TIMEOUT: 124')
+  calls=[]
+  def fake(run,state,label,commit='HEAD',done=None):
+   calls.append((label,sorted(done)));state['evaluations'].append({'label':label,'commit':core.git(self.w,'rev-parse','HEAD'),'passed':1,'due':1,'total':1,'categories':{},'metrics':{}});return state['evaluations'][-1]
+  with patch.object(core,'eval_dir',lambda cfg:self.root),patch.object(core,'evaluate_run',fake):
+   self.assertTrue(core.final_evaluation(self.run_,self.s))
+   self.assertIsNone(core.final_evaluation(self.run_,self.s))   # same commit: not scored twice
+   self.assertTrue(core.final_evaluation(self.run_,self.s,again=True))
+   self.s['tasks']['TASK-001']['status']='ACTIVE'
+   self.assertIsNone(core.final_evaluation(self.run_,self.s))   # work can still go on
+  self.assertEqual(calls[0][0],'final');self.assertEqual(len(calls[0][1]),27);self.assertEqual(len(calls),2)
+  row=core.summarize(core.read(self.run_.meta),self.s)
+  self.assertEqual((row['blocked_review_gaps'],row['blocked_errors']),(1,1))
+  self.assertIn('2 (1 review, 1 error)',core.comparison_markdown([row]))
  def test_evaluation_is_recorded_and_compared(self):
   self.assertIsNone(core.evaluate_run(self.run_,self.s,'TASK-001'))
   self.s['evaluations'].append({'label':'TASK-002','commit':'abc','eval_commit':'def','eval_version':1,'passed':3,'due':4,'total':41,

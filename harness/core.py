@@ -629,6 +629,23 @@ def catch_up_evaluations(run,state):
         state['evaluations'].sort(key=lambda e:(e.get('done_tasks',0),e['label']=='final'))
         write(run.state,state)
 
+def attempted(state):
+    """Tasks whose work is in the product: done ones and blocked ones (a blocked task's commits stay in
+    the workspace, so its checks are due in the final score)."""
+    return [k for k,t in state['tasks'].items() if t['status'] in ('DONE','BLOCKED')]
+
+def final_evaluation(run,state,again=False):
+    """Score the product as the run left it, once no task can go on. This is the run's headline score."""
+    if not again and (ready(state) or not eval_dir(run.cfg)):return None
+    head=git(run.workspace,'rev-parse','HEAD')
+    if not again and any(e['label']=='final' and e.get('commit')==head and 'error' not in e for e in state.get('evaluations',[])):return None
+    return evaluate_run(run,state,'final','HEAD',attempted(state))
+
+def blocked_kind(task):
+    """'review' when the task's own review kept finding gaps until the cycle limit (tests and handoffs were fine),
+    'error' when phases failed (timeouts, invalid handoffs, CLI failures, failed merges)."""
+    return 'review' if (task.get('blocked_reason') or '').startswith('REVIEW_GAPS') else 'error'
+
 def begin_invocation(state):
     """A fresh start of `run`: the operator has looked at it, so earlier stops and outage waits are over."""
     state.pop('halt',None);clear_streaks(state)
@@ -1127,6 +1144,7 @@ def summarize(meta,state):
     """Comparable figures for one run, derived only from run.json and state.json."""
     tasks=state['tasks'];events=state['events']
     counts={x:sum(v['status']==x for v in tasks.values()) for x in ('PENDING','ACTIVE','DONE','BLOCKED')}
+    blocked=[blocked_kind(v) for v in tasks.values() if v['status']=='BLOCKED']
     classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
     done=[t for t in tasks.values() if t['status']=='DONE']
     cost=total(events,'cost_usd')
@@ -1152,7 +1170,8 @@ def summarize(meta,state):
             'reported_models':sorted({e['usage'].get('reported_model') for e in events if e['usage'].get('reported_model')}),
             'isolation':meta.get('isolation','host'),'harness_commit':meta['harness_commit'],'host':meta['host'],'created':meta['created'],
             'finished':counts['PENDING']+counts['ACTIVE']==0 or not ready(state),
-            'tasks_total':len(tasks),'status_counts':counts,'completed_ratio':round(counts['DONE']/len(tasks),4),
+            'tasks_total':len(tasks),'status_counts':counts,
+            'blocked_review_gaps':blocked.count('review'),'blocked_errors':blocked.count('error'),'completed_ratio':round(counts['DONE']/len(tasks),4),
             'first_cycle_pass_ratio':round(sum(t['cycle']==1 for t in done)/len(done),4) if done else None,
             'phases_attempted':len(events),'phases_failed':sum(1 for e in events if e.get('failure_class')),'failure_classes':classes,
             'operator_interventions':len(state.get('interventions',[])),
@@ -1260,6 +1279,11 @@ def label(category):return 'UI' if category=='ui' else category.capitalize()
 def fmt_cost(v):return '—' if v is None else f'${v:.2f}'
 def fmt_pct(v):return '—' if v is None else f'{v*100:.0f}%'
 
+def fmt_blocked(r):
+    n=r['status_counts']['BLOCKED']
+    if not n or 'blocked_review_gaps' not in r:return str(n)
+    return f"{n} ({r['blocked_review_gaps']} review, {r['blocked_errors']} error)"
+
 def fmt_balance(evaluation,which):
     b=((evaluation or {}).get('balance') or {}).get(which)
     if not b:return '—'
@@ -1328,7 +1352,7 @@ def comparison_markdown(rows):
               r['merges'],r['merge_conflicts'],r['merge_conflict_files'],r['merges_failed'],fmt_time(r['merge_agent_seconds'])] for r in par]))
     out+=['','## Every run','']
     out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
-        [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",r['status_counts']['BLOCKED'],
+        [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",fmt_blocked(r),
           r['phases_attempted'],r['phases_failed'],r['operator_interventions'],fmt_time(r['wall_seconds_agent_calls']),fmt_count(r['reported_total_tokens']),fmt_cost(r['reported_total_cost_usd']),
           ', '.join(r['reported_models']) or '—',r['cli_version'] or r['cli'],r['isolation'],(r['harness_commit'] or '—')[:7]+('*' if (r['harness_commit'] or '').endswith('-dirty') else '')]
          for r in rows]))
@@ -1345,6 +1369,7 @@ def comparison_markdown(rows):
     if any(r.get('infra_failures') for r in rows):notes.append('Some runs met outages (connection, provider, login or local model server); those calls are repeated and not counted as failures or agent time.')
     if any(r.get('interruptions') for r in rows):notes.append('Some runs were interrupted and resumed; the interrupted phases were repeated from the start.')
     if any(len(r.get('cli_versions') or [])>1 for r in rows):notes.append('In some runs the agent CLI was updated between two starts; see `cli_versions` in comparison.json.')
+    if any(r['status_counts']['BLOCKED'] for r in rows):notes.append('"Blocked" separates tasks whose own review still found open points after the last cycle ("review": the work is there and counts in the final score) from tasks that failed by errors such as timeouts ("error").')
     if any(r['operator_interventions'] for r in rows):notes.append('Some runs had operator interventions (`unblock`).')
     if notes:out+=['','## Notes','']+['- '+n for n in notes]
     return '\n'.join(out)+'\n'
@@ -1433,7 +1458,7 @@ def main():
     if a.action=='evaluate':
         if not eval_dir(cfg):p.error('evaluation repository not found (see "eval" in benchmark.json)')
         with lock_run(run):
-            st=read(run.state);evaluate_run(run,st,'final');write(run.state,st)
+            st=read(run.state);final_evaluation(run,st,again=True);write(run.state,st)
         report(run);return
     if a.action=='unblock':
         with lock_run(run):
@@ -1459,6 +1484,7 @@ def main():
             try:run_parallel(run,st,a.max_phases,a.no_eval,a.allow_unsafe,not a.quiet,a.stop_on_limit)
             finally:
                 if run.container:stop_container(run)
+            if not a.no_eval and final_evaluation(run,st):write(run.state,st)
             report(run);return
         st=read_state(run);n=0;n_warned=[];begin_invocation(st);note_interruptions(run,st)
         if not a.no_eval:catch_up_evaluations(run,st)
@@ -1483,6 +1509,7 @@ def main():
                     write(run.state,st)
         finally:
             if run.container:stop_container(run)
+        if not a.no_eval and final_evaluation(run,st):write(run.state,st)
         report(run)
 
 if __name__=='__main__':main()
