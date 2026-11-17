@@ -231,7 +231,7 @@ class Integration(Base):
    self.assertTrue(core.final_evaluation(self.run_,self.s,again=True))
    self.s['tasks']['TASK-001']['status']='ACTIVE'
    self.assertIsNone(core.final_evaluation(self.run_,self.s))   # work can still go on
-  self.assertEqual(calls[0][0],'final');self.assertEqual(len(calls[0][1]),27);self.assertEqual(len(calls),2)
+  self.assertEqual(calls[0][0],'final');self.assertEqual(len(calls[0][1]),28);self.assertEqual(len(calls),2)
   row=core.summarize(core.read(self.run_.meta),self.s)
   self.assertEqual((row['blocked_review_gaps'],row['blocked_errors']),(1,1))
   self.assertIn('2 (1 review, 1 error)',core.comparison_markdown([row]))

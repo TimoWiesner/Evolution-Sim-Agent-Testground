@@ -1,6 +1,6 @@
 # Evolution Agent Benchmark v1
 
-A testing ground for agentic coding. Each coding agent is given the same 27 dependent tasks and has to build an evolution simulation from an empty starter project. The harness drives cloud models (Claude Code, Codex) and local models (through opencode) in exactly the same way, so their results can be compared.
+A testing ground for agentic coding. Each coding agent is given the same 28 dependent tasks and has to build an evolution simulation from an empty starter project. The harness drives cloud models (Claude Code, Codex) and local models (through opencode) in exactly the same way, so their results can be compared.
 
 Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is a **new CLI process** with no chat history; the agent's only memory is the files it wrote. Work happens in a local Git repository with no remotes.
 
@@ -105,7 +105,7 @@ Tasks are worked in a fixed order (started tasks first, then the lowest ready ta
 
 ## Tracks
 
-| Track | How the 27 tasks are worked |
+| Track | How the 28 tasks are worked |
 |---|---|
 | `sequential` | One agent at a time, one task after the other. |
 | `parallel` | Up to N agents at the same time, each on a different task whose prerequisites are done. The harness does the splitting. |
@@ -171,11 +171,11 @@ Agents choose language, architecture and UI themselves, but every product must e
 - `evosim ui --screenshots DIR` must write images of the real UI, which the results repository shows side by side.
 - `scenarios/demo.json` is the product's demo scenario; the README's demo command uses it.
 
-This makes products from different models testable with one black-box suite and packageable with one build step. Seven of the 27 tasks carry the matching acceptance criteria.
+This makes products from different models testable with one black-box suite and packageable with one build step. Seven of the 28 tasks carry the matching acceptance criteria.
 
 ## Tasks
 
-All 27 task files have the same sections, so that weaker models are not left guessing and stronger ones know where their freedom lies:
+All 28 task files have the same sections, so that weaker models are not left guessing and stronger ones know where their freedom lies:
 
 | Section | Meaning |
 |---|---|
@@ -185,6 +185,8 @@ All 27 task files have the same sections, so that weaker models are not left gue
 | Not part of this task | What belongs to other tasks. |
 
 The three UI tasks (23 to 25) add two sections. "Must have" is a functional baseline that a small model can reach: world view, controls, inspector, parameter editing, charts. "Design freedom" hands the look and feel to the agent, with ideas but no requirements, and can never fail a task. "Screenshots" asks the product to render its own interface to PNG files; this is scored by one hidden check and published, but does not block the task.
+
+TASK-027 (ecosystem balance) is the one task about tuning: with the batch tool in hand, the agent measures how long the food chain lasts, analyses why the first kind dies out, tries mechanism changes and records every trial. It passes on method and honesty, not on the outcome; the outcome is measured by the hidden balance figure. It runs right before TASK-028, the delivery.
 
 The five mechanism tasks for plants and animals (11, 12, 14, 15, 16) add an "Ecology ideas" section: mechanisms that keep a food chain going without forced anti-extinction, such as regenerating resources, satiation or refuges for prey. Like design freedom, they are suggestions and can never fail a task.
 

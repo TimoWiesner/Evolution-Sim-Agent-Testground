@@ -26,4 +26,4 @@ Decide these yourself and write down what you chose and why.
 
 ## Not part of this task
 - The command line (TASK-019).
-- Guaranteeing coexistence: populations may collapse. Long coexistence of all three kinds is the goal and is measured, but this task passes on the points above (TASK-028 tunes it further).
+- Guaranteeing coexistence: populations may collapse. Long coexistence of all three kinds is the goal and is measured, but this task passes on the points above (TASK-027 tunes it further).

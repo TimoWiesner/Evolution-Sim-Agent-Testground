@@ -1,28 +1,28 @@
-# TASK-027: Reliability and delivery
+# TASK-027: Ecosystem balance
 
 ## Depends on
-TASK-018, TASK-021, TASK-022, TASK-025, TASK-026
+TASK-018, TASK-020, TASK-021
 
 ## Goal
-Prove that the finished product is robust, and hand it over so that someone else can use it.
+Make plants, herbivores and carnivores coexist for as long as possible with natural mechanisms, and show by measurement what works and what does not.
 
 ## Must have
 The review passes only if every point is met and shown by a test or a recorded command.
 
-- every command and required behaviour in `docs/CONTRACT.md` is verified and the evidence recorded
-- `./build.sh` output is self-contained as required by `docs/CONTRACT.md` section 6
-- Runs of at least 10,000 ticks complete for at least three seeds without errors; the results are recorded.
-- Randomised tests check the invariants over many seeds and configurations: birth/death accounting, value ranges, wrapping, determinism.
-- The whole test suite passes with the one documented command.
-- `README.md` covers installation, the `run`, `batch` and `ui` commands, the configuration parameters and the one command that starts the demo scenario `scenarios/demo.json` (`docs/CONTRACT.md` section 7).
-- For the demo scenario and for a configuration with only the fixed keys, runs of 10,000 ticks with at least three seeds record how long plants, herbivores and carnivores coexisted; `README.md` states the result.
-- A self-audit lists every requirement of `docs/PROJECT.md` as met, partly met or missing, and the known limitations are stated openly.
+- A baseline is measured with `./evosim batch` before anything is changed: the configuration with only the fixed keys of `docs/CONTRACT.md` section 3, 10,000 ticks, at least ten seeds; per seed and kind the tick of extinction or survival is recorded.
+- The cause of the first extinction in the baseline is analysed from recorded data (which kind dies out first, its causes of death, the population curves of all three kinds) and written down before the first change.
+- At least one change to a mechanism, not only to a parameter value, is tried and measured.
+- Every trial is recorded with what was changed, what was expected and what was measured, also the trials that did not help.
+- The chosen defaults are measured again on at least five seeds that were not used while tuning, and that result is recorded.
+- No change breaks the rules of `docs/PROJECT.md` on extinction: organisms come only from the initial population or reproduction, and no rule depends on how many members a kind or species has left. The whole test suite still passes.
+- The outcome is stated openly in `docs/BALANCE.md`: how long the three kinds coexisted before and after, whether the goal was reached, and what limits remain.
 
 ## Your decisions
 Decide these yourself and write down what you chose and why.
 
-- Where the evidence is recorded (for example `docs/VERIFICATION.md`).
-- The demo scenario: aim for a world in which plants, herbivores and carnivores coexist as long as possible without forced anti-extinction, and record what you tried.
+- Which mechanisms and parameters to change.
+- How many trials to run and when to stop.
 
 ## Not part of this task
-- New features. Fix what the checks uncover; record what cannot be fixed.
+- Guaranteeing coexistence: this task passes on the points above, whatever the measured outcome. How long the food chain lasts is also measured by the benchmark.
+- New features that are not about the ecology; the user interface (only its presets may follow new defaults).

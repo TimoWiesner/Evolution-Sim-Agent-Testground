@@ -176,7 +176,7 @@ def run_readme(report, artifact, release_url, harness_url):
     ev = report['evaluation']; c = report['status_counts']
     lines = [f'# {report["profile"]} · {report["track"]} · {report["run_id"]}', '',
              f'One run of the [Evolution Agent Benchmark]({harness_url or "#"}): a coding agent builds an evolution '
-             'simulation from an empty project across 27 dependent tasks, with no human help.', '',
+             'simulation from an empty project across 28 dependent tasks, with no human help.', '',
              core.table(['', ''], [
                  ['Model', ', '.join(report['reported_models']) or report['model'] or 'CLI default'],
                  ['Agent CLI', report['cli_version'] or report['cli']],
@@ -258,7 +258,7 @@ def index_readme(reports, harness_url, repo_url):
     body = core.comparison_markdown(reports).split('\n', 2)[2] if reports else '\nNo runs published yet.\n'
     lines = ['# Evolution Agent Benchmark: results', '',
              f'Published runs of the [Evolution Agent Benchmark]({harness_url or "#"}). Each coding agent, cloud or local, '
-             'gets the same 27 dependent tasks and has to build an evolution simulation from an empty project on its own. '
+             'gets the same 28 dependent tasks and has to build an evolution simulation from an empty project on its own. '
              'Quality is scored by a private black-box test suite the agents never see.', '',
              'This page is generated; do not edit it by hand.', body, '## Runs', '']
     for r in reports:

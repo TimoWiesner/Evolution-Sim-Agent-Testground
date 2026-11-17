@@ -16,7 +16,7 @@ The review passes only if every point is met and shown by a test or a recorded c
 - Behavioural genes influence decisions. Test: two herbivores with different genomes act differently in the same situation.
 
 ## Ecology ideas
-These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-028).
+These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-027).
 
 - Satiation: a full herbivore stops eating, so it does not strip a cell bare.
 - Eating only part of a plant per bite, leaving enough for it to regrow.

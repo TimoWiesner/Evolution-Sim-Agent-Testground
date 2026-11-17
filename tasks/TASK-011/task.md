@@ -17,7 +17,7 @@ The review passes only if every point is met and shown by a test or a recorded c
 - Genome-derived traits influence growth or tolerance.
 
 ## Ecology ideas
-These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-028).
+These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-027).
 
 - Cell resources (water, nutrients or a single 'fertility' value) that are used up by growth and regenerate slowly up to a cap set by the climate: this gives logistic growth, so plants stop at a carrying capacity instead of exploding or vanishing.
 - Growth that slows as a cell gets crowded, so dense patches level off.

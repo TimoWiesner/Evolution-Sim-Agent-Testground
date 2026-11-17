@@ -2,8 +2,8 @@ import unittest, tempfile, json, pathlib, sys
 from harness.core import specs, initial_state, ready, handoff_valid, adapter, usage, config, resolve_profile, choose_ready
 class RunnerTests(unittest.TestCase):
  def test_task_graph(self):
-  sp=specs();self.assertEqual(len(sp),27)
-  self.assertEqual(len(set(sp)),27)
+  sp=specs();self.assertEqual(len(sp),28)
+  self.assertEqual(len(set(sp)),28)
   for t,x in sp.items():
    for d in x['dependencies']:
     self.assertIn(d,sp);self.assertLess(int(d[-3:]),int(t[-3:]))
@@ -74,20 +74,20 @@ class RunnerTests(unittest.TestCase):
   self.assertIn('docs/CONTRACT.md',core.protected_manifest())
   self.assertIn('docs/CONTRACT.md',core.prompt_for('TASK-001','plan',1,'/tmp'))
   sp=specs()
-  for t in ('TASK-002','TASK-003','TASK-019','TASK-021','TASK-022','TASK-023','TASK-027'):
+  for t in ('TASK-002','TASK-003','TASK-019','TASK-021','TASK-022','TASK-023','TASK-028'):
    self.assertTrue(any('docs/CONTRACT.md' in c for c in sp[t]['acceptance_criteria']),t)
   self.assertIn('--screenshots DIR',(core.ROOT/'starter/docs/CONTRACT.md').read_text())
  def test_long_tasks_get_more_time(self):
   from harness import core
   long={t for t,s in specs().items() if s.get('timeout_factor')}
-  self.assertEqual(long,{'TASK-018','TASK-019','TASK-021','TASK-022','TASK-024','TASK-025','TASK-026','TASK-027'})
+  self.assertEqual(long,{'TASK-018','TASK-019','TASK-021','TASK-022','TASK-024','TASK-025','TASK-026','TASK-027','TASK-028'})
   class R:profile={'phase_timeout_seconds':1800}
   self.assertEqual((core.phase_timeout(R,'TASK-001'),core.phase_timeout(R,'TASK-027')),(1800,3600))
   self.assertIn('after 60 minutes',core.prompt_for('TASK-027','plan',1,'/tmp',seconds=3600))
   self.assertNotIn('TIME LIMIT',core.prompt_for('TASK-001','plan',1,'/tmp'))
  def test_tasks_share_one_format(self):
   from harness import core
-  sp=specs();self.assertEqual(len(sp),27)
+  sp=specs();self.assertEqual(len(sp),28)
   for t,s in sp.items():
    md=(core.ROOT/'tasks'/t/'task.md').read_text()
    for head in ('## Depends on','## Goal','## Must have','## Your decisions','## Not part of this task'):self.assertIn(head,md,t)

@@ -16,7 +16,7 @@ The review passes only if every point is met and shown by a test or a recorded c
 - Hunting costs energy whether it succeeds or not; a carnivore without prey starves.
 
 ## Ecology ideas
-These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-028).
+These are ideas from ecology for keeping the food chain going without forced anti-extinction (see `docs/PROJECT.md`). None of them is required and nothing in this section can fail the task; use, change or ignore them. Whether all three kinds coexist over long runs is measured later (TASK-018, TASK-027).
 
 - A handling time after a kill (eating, resting), which limits how many herbivores one carnivore can take.
 - Hunting success that drops when prey is scarce or hidden, so rare prey is not hunted to the last animal.
