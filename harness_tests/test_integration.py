@@ -24,6 +24,8 @@ if match:
   elif os.getenv('FAKE_CONFLICT')=='1' and phase=='implement':state.write_text(task+'\\n')
   else:state.write_text(state.read_text() if os.getenv('FAKE_CONFLICT')=='1' else 'updated\\n')
   if phase=='implement':(pathlib.Path.cwd()/(task+'.txt')).write_text(task)
+if os.getenv('FAKE_LEFTOVER')=='1':
+ pathlib.Path('leftover.txt').write_text('x');(pathlib.Path.cwd()/'docs'/'STATE.md').write_text('half done\\n')
 if os.getenv('FAKE_OUTAGE')=='1':print(json.dumps({'type':'error','error':{'message':'fetch failed: ECONNREFUSED'}}),flush=True);sys.exit(1)
 if os.getenv('FAKE_AUTH')=='1':print(json.dumps({'type':'error','error':{'message':'401 Unauthorized'}}),flush=True);sys.exit(1)
 if os.getenv('FAKE_LIMIT')=='1':print(json.dumps({'type':'error','error':{'message':'429 Too Many Requests: usage limit reached'}}),flush=True);sys.exit(1)
@@ -139,6 +141,25 @@ class Integration(Base):
   core.note_interruptions(self.run_,self.s)
   self.assertEqual(self.s['interruptions'][0]['task'],'TASK-001');self.assertFalse((self.run_.base/'inflight.json').exists())
   self.assertEqual(core.summarize(core.read(self.run_.meta),self.s)['interruptions'],1)
+ def test_refused_call_leaves_nothing_behind(self):
+  state=self.w/'docs/STATE.md';original=state.read_text()
+  for kind in ('FAKE_LIMIT','FAKE_OUTAGE'):
+   with patch.dict(os.environ,{kind:'1','FAKE_MISSING':'1','FAKE_LEFTOVER':'1'}):self.assertFalse(self.phase())
+   self.assertFalse((self.w/'leftover.txt').exists());self.assertEqual(state.read_text(),original)
+   self.assertEqual(core.git(self.w,'status','--porcelain'),'')
+ def test_interrupted_phase_leaves_nothing_behind(self):
+  head=core.git(self.w,'rev-parse','HEAD');(self.w/'leftover.txt').write_text('x')
+  core.write(self.run_.base/'inflight.json',{'task':'TASK-001','phase':'plan','head':head})
+  core.note_interruptions(self.run_,self.s)
+  self.assertFalse((self.w/'leftover.txt').exists())
+ def test_files_of_a_failed_commit_survive_a_refused_call(self):
+  real=core.git
+  def broken(w,*args,**k):
+   if args[0]=='commit':raise RuntimeError('disk full')
+   return real(w,*args,**k)
+  with patch.object(core,'git',broken):self.assertTrue(self.phase())
+  with patch.dict(os.environ,{'FAKE_LIMIT':'1','FAKE_MISSING':'1'}):self.assertFalse(self.phase())
+  self.assertTrue((self.w/'tasks/TASK-001/handoffs/plan-cycle1.json').exists())
  def test_damaged_state_falls_back_to_the_previous_one(self):
   core.write(self.run_.state,{'n':1});core.write(self.run_.state,{'n':2})
   self.run_.state.write_text('{"n":')

@@ -323,6 +323,20 @@ def repair_checkout(w):
     for line in done: print('REPAIR:',line,flush=True)
     return done
 
+def discard_uncommitted(w, commit, ts=None):
+    """Put a checkout back to `commit`: what a call wrote that does not count (refused by a limit, cut
+    off by an outage or by killing the harness) must not help the repeated phase. Ignored files such as
+    build output stay. Files of a counted phase whose commit failed are still waiting and are kept."""
+    if not commit or not (pathlib.Path(w)/'.git').exists(): return False
+    if ts and ts['history'] and ts['history'][-1].get('commit_error'): return False
+    unlock_git(w)
+    try:
+        subprocess.run(['git','merge','--abort'],cwd=w,capture_output=True)
+        git(w,'reset','-q','--hard',commit,timeout=GIT_SLOW); git(w,'clean','-fdq',timeout=GIT_SLOW)
+    except (RuntimeError,subprocess.TimeoutExpired) as e:
+        print('WARNING: could not reset the checkout:',str(e)[:300],flush=True); return False
+    return True
+
 def init(run):
     w = run.workspace
     if run.state.exists(): return w
@@ -584,6 +598,9 @@ def note_interruptions(run,state):
         try:info=read(f)
         except ValueError:info={}
         print('WARNING: prior interrupted phase:',info,flush=True)
+        task=info.get('task')
+        if task in state['tasks'] and info.get('phase') in PHASES:
+            discard_uncommitted(run.place(task,info['phase'])[0],info.get('head'),state['tasks'][task])
         state.setdefault('interruptions',[]).append({**info,'noticed':now()})
         f.unlink()
 
@@ -866,7 +883,8 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     repairs=repair_checkout(w)
     archive_handoff(run,hand,label)
     # checkpoint before any agent process, survives power loss
-    write(inflight_path(run,task),{'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'started':now()})
+    before=git(w,'rev-parse','HEAD')
+    write(inflight_path(run,task),{'task':task,'phase':phase,'cycle':cycle,'recovery':recovery,'head':before,'started':now()})
     down=ports_down(run.profile)
     if down:
         with lock:note_infra(run,state,task,phase,cycle,{'kind':'server','detail':f'nothing answers on local port {down[0]}'},label)
@@ -875,7 +893,8 @@ def execute_phase(run,state,task,unsafe=False,live=True,lock=None):
     r=agent_call(run,task,phase,cycle,label,unsafe,live)
     with lock:
         hand_ok,reason=handoff_valid(hand,task,phase,cycle)
-        if refused(run,state,task,phase,cycle,label,r,hand_ok):return False
+        if refused(run,state,task,phase,cycle,label,r,hand_ok):
+            discard_uncommitted(w,before,ts);return False
         clear_streaks(state)
         intact,integrity_error=protected_ok(w)
         if not intact:reason='Protected benchmark spec modified: '+integrity_error
