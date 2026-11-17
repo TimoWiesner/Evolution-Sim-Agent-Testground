@@ -8,7 +8,7 @@
   ],
   "objective": "Make plants, herbivores and carnivores coexist for as long as possible with natural mechanisms, and show by measurement what works and what does not.",
   "acceptance_criteria": [
-    "A baseline is measured with `./evosim batch` before anything is changed: the configuration with only the fixed keys of `docs/CONTRACT.md` section 3, 10,000 ticks, at least ten seeds; per seed and kind the tick of extinction or survival is recorded.",
+    "A baseline is measured with `./evosim batch` before anything is changed: the example configuration of `docs/CONTRACT.md` section 3, which the benchmark also measures (section 7), 10,000 ticks, at least ten seeds; per seed and kind the tick of extinction or survival is recorded.",
     "The cause of the first extinction in the baseline is analysed from recorded data (which kind dies out first, its causes of death, the population curves of all three kinds) and written down before the first change.",
     "At least one change to a mechanism, not only to a parameter value, is tried and measured.",
     "Every trial is recorded with what was changed, what was expected and what was measured, also the trials that did not help.",

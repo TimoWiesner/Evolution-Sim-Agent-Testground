@@ -17,7 +17,7 @@
     "Randomised tests check the invariants over many seeds and configurations: birth/death accounting, value ranges, wrapping, determinism.",
     "The whole test suite passes with the one documented command.",
     "`README.md` covers installation, the `run`, `batch` and `ui` commands, the configuration parameters and the one command that starts the demo scenario `scenarios/demo.json` (`docs/CONTRACT.md` section 7).",
-    "For the demo scenario and for a configuration with only the fixed keys, runs of 10,000 ticks with at least three seeds record how long plants, herbivores and carnivores coexisted; `README.md` states the result.",
+    "For the demo scenario and for the example configuration of `docs/CONTRACT.md` section 3, runs of 10,000 ticks with at least three seeds record how long plants, herbivores and carnivores coexisted; `README.md` states the result.",
     "A self-audit lists every requirement of `docs/PROJECT.md` as met, partly met or missing, and the known limitations are stated openly."
   ],
   "decisions": [

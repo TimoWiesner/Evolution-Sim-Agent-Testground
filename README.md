@@ -202,7 +202,7 @@ Reports and the comparison give, per run:
 - agent wall time
 - tokens split into fresh input, cached input and output, and cost, where the CLI reports them
 
-- balance: how long plants, herbivores and carnivores coexist over 10,000 ticks, scored 0 to 100, once in a fixed world with the product's default parameters and once in its own demo scenario. The tasks allow collapse, so this is a figure for comparison, not a pass/fail check.
+- balance: how long plants, herbivores and carnivores coexist over 10,000 ticks, scored 0 to 100, once in the contract's example configuration with the product's default parameters and once in its own demo scenario. The tasks allow collapse, so this is a figure for comparison, not a pass/fail check.
 
 Token counts are normalised across CLIs: cached input is listed separately because it dominates Claude Code's totals and is billed at a fraction of the price. Missing usage is shown as unknown, never as zero; a sum that lacks some phases is shown as a lower bound (`≥`). Codex reports no cost. Speed and cost are separate columns and are never folded into a quality figure.
 

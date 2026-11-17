@@ -136,4 +136,4 @@ The benchmark publishes these images next to those of other agents.
 
 `scenarios/demo.json` is a configuration (section 3) that `run`, `batch` and `ui --config` accept; the demo command in `README.md` uses it. It is required once the task that owns it is done.
 
-The benchmark runs it for 10,000 ticks with several seeds (`--seed`) and records how long plants, herbivores and carnivores coexist in it. It does the same with a fixed configuration that contains only the keys of section 3, so your default parameters are measured too. Collapse is allowed and is not an error (section 5.4, no forced anti-extinction); a food chain that lasts longer compares better.
+The benchmark runs it for 10,000 ticks with several seeds (`--seed`) and records how long plants, herbivores and carnivores coexist in it. It does the same with the example configuration of section 3 (64×48 cells, 400 plants, 120 herbivores, 20 carnivores, only the fixed keys), so your default parameters are measured too; you can run exactly this configuration yourself. Collapse is allowed and is not an error (section 5.4, no forced anti-extinction); a food chain that lasts longer compares better.
