@@ -1423,27 +1423,27 @@ def main():
             report(run);return
         st=read_state(run);n=0;n_warned=[];begin_invocation(st);note_interruptions(run,st)
         if not a.no_eval:catch_up_evaluations(run,st)
-        while True:
-            if a.max_phases is not None and n>=a.max_phases:break
-            stop=budget_reached(st,cfg)
-            if stop:print(stop);break
-            task=choose_ready(st)
-            if not task:break
-            try:counted=execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
-            except BaseException:
-                if run.container:stop_container(run)
-                raise
-            write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=bool(counted)
-            if st.get('halt'):break
-            if st.get('paused_until'):
-                go_on=wait_for_limit(st,cfg,a.stop_on_limit);write(run.state,st)
-                if not go_on:break
-            if not counted:continue
-            if st['tasks'][task]['status']=='DONE' and not a.no_eval:
-                if evaluate_run(run,st,task) is None and not n_warned:
-                    print('NOTE: hidden evaluation skipped, evaluation repository not found');n_warned.append(1)
-                write(run.state,st)
-        if run.container:stop_container(run)
+        # Whatever ends the loop (also Ctrl+C while waiting for a limit), the container must not stay up.
+        try:
+            while True:
+                if a.max_phases is not None and n>=a.max_phases:break
+                stop=budget_reached(st,cfg)
+                if stop:print(stop);break
+                task=choose_ready(st)
+                if not task:break
+                counted=execute_phase(run,st,task,a.allow_unsafe,not a.quiet)
+                write(run.state,st);(b/'inflight.json').unlink(missing_ok=True);n+=bool(counted)
+                if st.get('halt'):break
+                if st.get('paused_until'):
+                    go_on=wait_for_limit(st,cfg,a.stop_on_limit);write(run.state,st)
+                    if not go_on:break
+                if not counted:continue
+                if st['tasks'][task]['status']=='DONE' and not a.no_eval:
+                    if evaluate_run(run,st,task) is None and not n_warned:
+                        print('NOTE: hidden evaluation skipped, evaluation repository not found');n_warned.append(1)
+                    write(run.state,st)
+        finally:
+            if run.container:stop_container(run)
         report(run)
 
 if __name__=='__main__':main()
