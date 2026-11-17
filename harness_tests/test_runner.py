@@ -37,7 +37,14 @@ class RunnerTests(unittest.TestCase):
   u=usage('codex',json.dumps({'type':'turn.completed','usage':{'input_tokens':100,'cached_input_tokens':80,'output_tokens':7}}))
   self.assertEqual((u['input_tokens'],u['cached_input_tokens'],u['output_tokens'],u['tokens']),(20,80,7,107))
   out='\n'.join(json.dumps(x) for x in ({'type':'system','subtype':'init','model':'m-1'},{'type':'result','total_cost_usd':0.5,'usage':{'input_tokens':4,'output_tokens':6}}))
-  self.assertEqual(usage('claude',out),{'tokens':10,'input_tokens':4,'cached_input_tokens':0,'output_tokens':6,'cost_usd':0.5,'reported_model':'m-1','subagents':0,'delegated':False})
+  self.assertEqual(usage('claude',out),{'tokens':10,'input_tokens':4,'cached_input_tokens':0,'output_tokens':6,'cost_usd':0.5,'reported_model':'m-1','subagents':0,'delegated':False,'estimated':False})
+ def test_claude_results_are_session_totals(self):
+  res=lambda out,cost:{'type':'result','session_id':'s','total_cost_usd':cost,'modelUsage':{'m':{'inputTokens':1,'cacheReadInputTokens':10,'outputTokens':out}}}
+  u=usage('claude','\n'.join(json.dumps(x) for x in (res(5,0.1),res(8,0.3))))
+  self.assertEqual((u['tokens'],u['cost_usd'],u['estimated']),(19,0.3,False))   # the last result, not the sum
+  msg=lambda i,out:{'type':'assistant','message':{'id':i,'usage':{'input_tokens':2,'cache_read_input_tokens':100,'output_tokens':out}}}
+  u=usage('claude','\n'.join(json.dumps(x) for x in (msg('a',3),msg('a',3),msg('b',4))))   # cut off: no result
+  self.assertEqual((u['input_tokens'],u['cached_input_tokens'],u['output_tokens'],u['cost_usd'],u['estimated']),(4,200,7,None,True))
  def test_container_commands(self):
   from harness import core
   cfg=config();cfg['runs_root']='/tmp/evo-test-runs'

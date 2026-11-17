@@ -391,9 +391,16 @@ def usage(cli, out):
     reasoning. `tokens` is their sum.
 
     `delegated` says whether the agent handed work to subagents in this process, `subagents` how many
-    it started (None where the CLI does not report a number)."""
+    it started (None where the CLI does not report a number).
+
+    Claude Code writes a result event each time the agent stops, and an agent woken again by a
+    background task stops more than once; the figures in a result are totals of the session so far,
+    so only the last result of each session counts. A call that was cut off before any result (a
+    timeout) is counted from the per-request usage of its messages: `estimated` is then True and the
+    cost unknown."""
     cost=model=None;seen=False;t=dict.fromkeys(TOKEN_KINDS,0)
-    spawned=0 if cli!='codex' else None;delegated=False;task_calls=set()
+    spawned=0 if cli!='codex' else None;delegated=False;task_calls=set();estimated=False
+    results={};messages={}
     def num(d,*keys):
         return sum(d.get(k) or 0 for k in keys if isinstance(d.get(k),(int,float)))
     for line in out.splitlines():
@@ -403,25 +410,10 @@ def usage(cli, out):
         if cli=='claude':
             if o.get('type')=='system' and o.get('subtype')=='init' and isinstance(o.get('model'),str):
                 model=o['model']
-            if o.get('type')=='result':
-                c=o.get('total_cost_usd')
-                if isinstance(c,(int,float)): cost=(cost or 0)+float(c)
-                u=o.get('usage');per_model=o.get('modelUsage')
-                if isinstance(per_model,dict) and per_model:
-                    # Per-model totals include the tokens of subagents; `usage` covers the main agent only.
-                    for m in per_model.values():
-                        if isinstance(m,dict):
-                            seen=True
-                            t['input_tokens']+=num(m,'inputTokens','cacheCreationInputTokens')
-                            t['cached_input_tokens']+=num(m,'cacheReadInputTokens')
-                            t['output_tokens']+=num(m,'outputTokens')
-                elif isinstance(u,dict):
-                    seen=True
-                    t['input_tokens']+=num(u,'input_tokens','cache_creation_input_tokens')
-                    t['cached_input_tokens']+=num(u,'cache_read_input_tokens')
-                    t['output_tokens']+=num(u,'output_tokens')
-                stats=o.get('subagent_stats')
-                if isinstance(stats,dict):spawned+=num(stats,'spawned')
+            if o.get('type')=='result':results[o.get('session_id')]=o
+            if o.get('type')=='assistant' and isinstance(o.get('message'),dict) and isinstance(o['message'].get('usage'),dict):
+                # One request can show up as several events (one per content block) with the same id and usage.
+                messages[o['message'].get('id') or len(messages)]=o['message']['usage']
         elif cli=='codex' and (o.get('item') or {}).get('type')=='collab_tool_call':
             delegated=True   # Codex shows that agents collaborated, but not how many were started
         elif cli=='codex' and o.get('type')=='turn.completed':
@@ -444,9 +436,35 @@ def usage(cli, out):
                     t['input_tokens']+=num(u,'input')+num(cache,'write')
                     t['cached_input_tokens']+=num(cache,'read')
                     t['output_tokens']+=num(u,'output','reasoning')
+    if cli=='claude':
+        for o in results.values():
+            c=o.get('total_cost_usd')
+            if isinstance(c,(int,float)): cost=(cost or 0)+float(c)
+            u=o.get('usage');per_model=o.get('modelUsage')
+            if isinstance(per_model,dict) and per_model:
+                # Per-model totals include the tokens of subagents; `usage` covers the main agent only.
+                for m in per_model.values():
+                    if isinstance(m,dict):
+                        seen=True
+                        t['input_tokens']+=num(m,'inputTokens','cacheCreationInputTokens')
+                        t['cached_input_tokens']+=num(m,'cacheReadInputTokens')
+                        t['output_tokens']+=num(m,'outputTokens')
+            elif isinstance(u,dict):
+                seen=True
+                t['input_tokens']+=num(u,'input_tokens','cache_creation_input_tokens')
+                t['cached_input_tokens']+=num(u,'cache_read_input_tokens')
+                t['output_tokens']+=num(u,'output_tokens')
+            stats=o.get('subagent_stats')
+            if isinstance(stats,dict):spawned+=num(stats,'spawned')
+        if not results and messages:
+            seen=estimated=True
+            for u in messages.values():
+                t['input_tokens']+=num(u,'input_tokens','cache_creation_input_tokens')
+                t['cached_input_tokens']+=num(u,'cache_read_input_tokens')
+                t['output_tokens']+=num(u,'output_tokens')
     total=int(sum(t.values()))
     if cli=='opencode':spawned=len(task_calls)
-    extra={'cost_usd':cost,'reported_model':model,'subagents':None if spawned is None else int(spawned),'delegated':delegated or bool(spawned)}
+    extra={'cost_usd':cost,'reported_model':model,'subagents':None if spawned is None else int(spawned),'delegated':delegated or bool(spawned),'estimated':estimated}
     if not seen or not total:return {'tokens':None,**dict.fromkeys(TOKEN_KINDS),**extra}
     return {'tokens':total,**{k:int(v) for k,v in t.items()},**extra}
 
@@ -1140,6 +1158,11 @@ def total(events,key):
     values=[e['usage'].get(key) for e in events]
     return None if any(v is None for v in values) else sum(values)
 
+def known_total(events,key):
+    """Sum of a usage field over the phases that reported it (None when none did), and how many did not."""
+    values=[e['usage'].get(key) for e in events];known=[v for v in values if v is not None]
+    return (sum(known) if known else None),len(values)-len(known)
+
 def summarize(meta,state):
     """Comparable figures for one run, derived only from run.json and state.json."""
     tasks=state['tasks'];events=state['events']
@@ -1147,7 +1170,7 @@ def summarize(meta,state):
     blocked=[blocked_kind(v) for v in tasks.values() if v['status']=='BLOCKED']
     classes={k:sum(e.get('failure_class')==k for e in events) for k in sorted({e.get('failure_class') for e in events if e.get('failure_class')})}
     done=[t for t in tasks.values() if t['status']=='DONE']
-    cost=total(events,'cost_usd')
+    cost,no_cost=known_total(events,'cost_usd');tokens,no_tokens=known_total(events,'tokens')
     merges=state.get('merges',[]);spent=state['spent_seconds'];elapsed=state.get('elapsed_seconds',spent)
     parallel={'workers':meta.get('workers',1),'elapsed_seconds':round(elapsed,2),
               # Agent seconds per elapsed second: how many agents were busy on average.
@@ -1177,10 +1200,13 @@ def summarize(meta,state):
             'operator_interventions':len(state.get('interventions',[])),
             'evaluation':next((e for e in reversed(state.get('evaluations',[])) if 'error' not in e),None),
             'evaluations_failed':sum('error' in e for e in state.get('evaluations',[])),
-            'reported_total_tokens':total(events,'tokens'),**{'reported_'+k:total(events,k) for k in TOKEN_KINDS},
+            # Totals cover the phases that reported a figure; the counts below say how many did not.
+            'reported_total_tokens':tokens,**{'reported_'+k:known_total(events,k)[0] for k in TOKEN_KINDS},
             'reported_total_cost_usd':None if cost is None else round(cost,4),
+            'phases_without_tokens':no_tokens,'phases_without_cost':no_cost,
+            'phases_usage_estimated':sum(bool(e['usage'].get('estimated')) for e in events),
             'wall_seconds_agent_calls':round(state['spent_seconds'],2),
-            'unreported_usage_warning':total(events,'tokens') is None or cost is None}
+            'unreported_usage_warning':bool(no_tokens or no_cost)}
 
 def report(run):
     st=read(run.state);result=summarize(read(run.meta),st);result['tasks']=st['tasks']
@@ -1277,6 +1303,9 @@ def fmt_time(v):
 
 def label(category):return 'UI' if category=='ui' else category.capitalize()
 def fmt_cost(v):return '—' if v is None else f'${v:.2f}'
+def at_least(text,missing):
+    """A sum that lacks some phases is a lower bound."""
+    return text if not missing or text=='—' else '≥ '+text
 def fmt_pct(v):return '—' if v is None else f'{v*100:.0f}%'
 
 def fmt_blocked(r):
@@ -1310,7 +1339,7 @@ def comparison_markdown(rows):
         [[track,profile,g[0]['model'] or 'CLI default',len(g),fmt_pct(median([r['completed_ratio'] for r in g])),fmt_pct(median([r['first_cycle_pass_ratio'] for r in g])),
           fmt_count(median([r['phases_failed'] for r in g])),fmt_time(median([r['wall_seconds_agent_calls'] for r in g])),
           fmt_count(median([r['reported_input_tokens'] for r in g])),fmt_count(median([r['reported_cached_input_tokens'] for r in g])),
-          fmt_count(median([r['reported_output_tokens'] for r in g])),fmt_cost(median([r['reported_total_cost_usd'] for r in g]))]
+          fmt_count(median([r['reported_output_tokens'] for r in g])),at_least(fmt_cost(median([r['reported_total_cost_usd'] for r in g])),sum(r.get('phases_without_cost',0) for r in g))]
          for (track,profile),g in sorted(groups.items())]))
     scored=[r for r in rows if r['evaluation']]
     if scored:
@@ -1337,7 +1366,7 @@ def comparison_markdown(rows):
               '"Speed-up" compares agent time with the finished sequential run(s) of the same profile. Tokens and cost of subagents are included where the CLI reports them.','']
         out.append(table(['Profile','Run','Phases','Phases with delegation','Subagents started','Agent time','Speed-up','Tokens','Cost'],
             [[r['profile'],r['run_id'],r['phases_attempted'],r['phases_delegated'],fmt_count(r['subagents_started']),fmt_time(r['wall_seconds_agent_calls']),faster(r),
-              fmt_count(r['reported_total_tokens']),fmt_cost(r['reported_total_cost_usd'])] for r in sub]))
+              at_least(fmt_count(r['reported_total_tokens']),r.get('phases_without_tokens')),at_least(fmt_cost(r['reported_total_cost_usd']),r.get('phases_without_cost'))] for r in sub]))
     par=[r for r in rows if r['track']=='parallel']
     if par:
         def speedup(r):
@@ -1353,7 +1382,7 @@ def comparison_markdown(rows):
     out+=['','## Every run','']
     out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
         [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",fmt_blocked(r),
-          r['phases_attempted'],r['phases_failed'],r['operator_interventions'],fmt_time(r['wall_seconds_agent_calls']),fmt_count(r['reported_total_tokens']),fmt_cost(r['reported_total_cost_usd']),
+          r['phases_attempted'],r['phases_failed'],r['operator_interventions'],fmt_time(r['wall_seconds_agent_calls']),at_least(fmt_count(r['reported_total_tokens']),r.get('phases_without_tokens')),at_least(fmt_cost(r['reported_total_cost_usd']),r.get('phases_without_cost')),
           ', '.join(r['reported_models']) or '—',r['cli_version'] or r['cli'],r['isolation'],(r['harness_commit'] or '—')[:7]+('*' if (r['harness_commit'] or '').endswith('-dirty') else '')]
          for r in rows]))
     notes=[]
@@ -1365,6 +1394,7 @@ def comparison_markdown(rows):
     if len({(r['evaluation'].get('eval_version'),r['evaluation'].get('eval_commit')) for r in rows if r['evaluation']})>1:notes.append('Runs were scored with different versions of the hidden suite; re-run `evaluate` before comparing test results.')
     if any(r['evaluations_failed'] for r in rows):notes.append('Some evaluations could not be completed; see the run folders.')
     if any(not r['finished'] for r in rows):notes.append('Unfinished runs are included; their figures are partial.')
+    if any(r.get('phases_without_cost') or r.get('phases_without_tokens') for r in rows):notes.append('"≥" marks sums that lack phases which reported no figure (for example a phase cut off by the time limit before the CLI wrote its totals). Tokens of such Claude phases are counted from their messages where possible; their cost stays unknown.')
     if any(r.get('rate_limit_hits') for r in rows):notes.append('Some runs were paused by a provider usage limit; refused calls are repeated and not counted as failures or agent time.')
     if any(r.get('infra_failures') for r in rows):notes.append('Some runs met outages (connection, provider, login or local model server); those calls are repeated and not counted as failures or agent time.')
     if any(r.get('interruptions') for r in rows):notes.append('Some runs were interrupted and resumed; the interrupted phases were repeated from the start.')

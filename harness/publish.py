@@ -189,8 +189,8 @@ def run_readme(report, artifact, release_url, harness_url):
                  ['Operator interventions', report['operator_interventions']],
                  ['Agent time', core.fmt_time(report['wall_seconds_agent_calls'])],
                  ['Tokens (fresh input / cached input / output)',
-                  ' / '.join(core.fmt_count(report['reported_' + k]) for k in core.TOKEN_KINDS)],
-                 ['Cost', core.fmt_cost(report['reported_total_cost_usd'])],
+                  core.at_least(' / '.join(core.fmt_count(report['reported_' + k]) for k in core.TOKEN_KINDS), report.get('phases_without_tokens'))],
+                 ['Cost', core.at_least(core.fmt_cost(report['reported_total_cost_usd']), report.get('phases_without_cost'))],
                  ['Isolation', report['isolation']]]), '']
     if report['track'] == 'subagents':
         lines += ['## Delegation', '',

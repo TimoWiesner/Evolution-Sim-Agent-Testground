@@ -216,6 +216,8 @@ class Integration(Base):
   self.assertIn('| sequential | fake | fake/model-a | 2 |',md)
   self.assertTrue((self.run_.root/'comparison.json').exists())
   self.assertIsNone(core.total([{'usage':{'tokens':None}},{'usage':{'tokens':5}}],'tokens'))
+  self.assertEqual(core.known_total([{'usage':{'tokens':None}},{'usage':{'tokens':5}}],'tokens'),(5,1))
+  self.assertEqual((core.at_least('$2.00',1),core.at_least('$2.00',0),core.at_least('—',3)),('≥ $2.00','$2.00','—'))
  def test_final_evaluation_scores_blocked_work(self):
   for t in self.s['tasks'].values():t['status']='DONE'
   self.s['tasks']['TASK-027'].update(status='BLOCKED',blocked_reason='REVIEW_GAPS: max cycles reached')
