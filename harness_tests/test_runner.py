@@ -70,6 +70,14 @@ class RunnerTests(unittest.TestCase):
   for t in ('TASK-002','TASK-003','TASK-019','TASK-021','TASK-022','TASK-023','TASK-027'):
    self.assertTrue(any('docs/CONTRACT.md' in c for c in sp[t]['acceptance_criteria']),t)
   self.assertIn('--screenshots DIR',(core.ROOT/'starter/docs/CONTRACT.md').read_text())
+ def test_long_tasks_get_more_time(self):
+  from harness import core
+  long={t for t,s in specs().items() if s.get('timeout_factor')}
+  self.assertEqual(long,{'TASK-018','TASK-019','TASK-021','TASK-022','TASK-024','TASK-025','TASK-026','TASK-027'})
+  class R:profile={'phase_timeout_seconds':1800}
+  self.assertEqual((core.phase_timeout(R,'TASK-001'),core.phase_timeout(R,'TASK-027')),(1800,3600))
+  self.assertIn('after 60 minutes',core.prompt_for('TASK-027','plan',1,'/tmp',seconds=3600))
+  self.assertNotIn('TIME LIMIT',core.prompt_for('TASK-001','plan',1,'/tmp'))
  def test_tasks_share_one_format(self):
   from harness import core
   sp=specs();self.assertEqual(len(sp),27)

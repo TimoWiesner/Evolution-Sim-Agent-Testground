@@ -754,11 +754,11 @@ PARALLEL_NOTE=('PARALLEL WORK: this workspace is your private checkout for this 
                'files, so the merge stays simple. Build output and installed project dependencies are not shared between checkouts; '
                'run ./setup.sh here when something is missing. ')
 
-def merge_prompt(task,cycle,files,w,sandbox=False):
+def merge_prompt(task,cycle,files,w,sandbox=False,seconds=None):
     w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'merge-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
-            + (SANDBOX_NOTE if sandbox else '') +
+            + (SANDBOX_NOTE if sandbox else '') + time_note(seconds) +
             f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. Fresh context; no prior conversation. '
             f'Task {task}, phase MERGE, cycle {cycle}. '
             f'{task} was developed in parallel with other tasks and has passed its review. Git is now merging it into the main line '
@@ -778,12 +778,22 @@ DELEGATION_NOTE=('DELEGATION: in this run you may hand parts of this phase to su
                  'independently. This is encouraged where it helps and not required; decide yourself. You stay responsible for the '
                  'result: check what subagents return, keep them inside this task, phase and workspace, and write the handoff yourself. ')
 
-def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False,delegate=False):
+def phase_timeout(run,task):
+    """Seconds one phase of `task` may take: the profile's limit times the task's `timeout_factor`
+    (tasks with long simulation runs, measurements or UI checks get more time)."""
+    return int(run.profile['phase_timeout_seconds']*specs().get(task,{}).get('timeout_factor',1))
+
+def time_note(seconds):
+    if not seconds:return ''
+    return (f'TIME LIMIT: this phase is ended after {round(seconds/60)} minutes. Plan long test or simulation runs so that '
+            f'they and the handoff fit in that time; a phase that is cut off counts as a timeout. ')
+
+def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False,delegate=False,seconds=None):
     if w is None: w=pathlib.Path.cwd()
     w=pathlib.PurePosixPath(w) if sandbox else pathlib.Path(w).resolve()
     hand=w/'tasks'/task/'handoffs'/f'{phase}-cycle{cycle}.json'
     return (f'WORKSPACE ROOT (absolute): {w}\n'
-            + (SANDBOX_NOTE if sandbox else '') + (PARALLEL_NOTE if parallel else '') + (DELEGATION_NOTE if delegate else '') +
+            + (SANDBOX_NOTE if sandbox else '') + (PARALLEL_NOTE if parallel else '') + (DELEGATION_NOTE if delegate else '') + time_note(seconds) +
             f'IMPORTANT: This is the ONLY code project root; do NOT access files outside it. '
             f'First verify files {w}/AGENTS.md and {w}/docs/STATE.md exist. '
             f'Use absolute paths when unsure. Fresh context; no prior conversation. '
@@ -814,11 +824,11 @@ def error_class(r,ok,reason,integrity,check):
 
 def phase_argv(run,task,phase,cycle,unsafe=False,files=()):
     """Full command for one phase: the CLI adapter plus prompt, wrapped for the container if used."""
-    timeout=run.profile['phase_timeout_seconds'];host,inside=run.place(task,phase)
+    timeout=phase_timeout(run,task);host,inside=run.place(task,phase)
     w=inside if run.container else host
     sub=run.track=='subagents'
-    if phase=='merge':prompt=merge_prompt(task,cycle,files,w,sandbox=run.container)
-    else:prompt=prompt_for(task,phase,cycle,w,sandbox=run.container,parallel=run.track=='parallel',delegate=sub)
+    if phase=='merge':prompt=merge_prompt(task,cycle,files,w,sandbox=run.container,seconds=timeout)
+    else:prompt=prompt_for(task,phase,cycle,w,sandbox=run.container,parallel=run.track=='parallel',delegate=sub,seconds=timeout)
     if run.container:
         return container_exec_argv(run,adapter(run.profile,True,sub)+[prompt],timeout,inside)
     return adapter(run.profile,unsafe,sub)+[prompt]
@@ -831,7 +841,7 @@ def log_file(run,label):
 
 def agent_call(run,task,phase,cycle,label,unsafe=False,live=True,files=()):
     """Run one fresh agent process for a phase and return the result of `cmd`."""
-    b=run.base;w=run.place(task,phase)[0];limit=run.profile['phase_timeout_seconds']
+    b=run.base;w=run.place(task,phase)[0];limit=phase_timeout(run,task)
     argv=phase_argv(run,task,phase,cycle,unsafe,files);log=log_file(run,label)
     prefix=f'[{task}] ' if run.track=='parallel' else '';watch=server_watch(run.profile)
     if run.container:

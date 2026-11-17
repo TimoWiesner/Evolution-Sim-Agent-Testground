@@ -9,6 +9,7 @@
 - A merge runs `git fetch <checkout> HEAD` and `git merge --no-ff --no-commit FETCH_HEAD` in the main workspace. On conflicts an agent call with phase `merge` runs there; the harness then requires a valid handoff, intact protected files, no `<<<<<<<`/`>>>>>>>` markers in the conflicted files, and that the task's commit is an ancestor of the result. On failure the workspace is reset to the commit before the merge. Merge calls are ordinary events (tokens, cost and time count); `state.json` also keeps one `merges` record per task.
 - `elapsed_seconds` in `state.json` accumulates the wall-clock time of the parallel scheduling loop over all invocations. Hidden evaluations run in a separate single thread on the merge commit, with the list of done tasks as it was at that merge.
 
+- Phase time limit: the profile's `phase_timeout_seconds` times the task's `timeout_factor` in `task.json` (2 for TASK-018, 019, 021, 022, 024, 025, 026 and 027, which need long simulation runs, measurements or UI checks; 1 otherwise). The prompt states the limit in minutes so the agent can plan long runs.
 - Each task phase gets a fresh CLI subprocess. All relevant context is loaded from workspace files and the explicit absolute handoff destination.
 - OpenCode uses `--standalone` to avoid user-level shared daemon session association; the subprocess `cwd` identifies the workspace.
 - Task descriptions and skill sources are copied from the operator package. Only benchmark-controlled immutable files are integrity-checked. Generated `handoffs/` files are excluded.

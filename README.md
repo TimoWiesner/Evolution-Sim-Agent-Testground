@@ -41,7 +41,7 @@ A profile is a named combination of CLI, model and settings in `benchmark.json`.
 |---|---|
 | `cli` | `claude`, `codex` or `opencode` |
 | `model` | Model id passed to the CLI; `null` uses the CLI's default |
-| `phase_timeout_seconds` | Time limit per phase; raise it for slow local hardware |
+| `phase_timeout_seconds` | Time limit per phase; raise it for slow local hardware. Tasks with `timeout_factor` in `task.json` get a multiple of it |
 | `max_turns` | Claude only; `null` leaves the CLI's own limit |
 | `extra_args` | Extra CLI arguments |
 | `env` | Extra environment variables for the CLI process |

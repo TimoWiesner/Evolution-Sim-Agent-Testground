@@ -31,6 +31,7 @@
     "review"
   ],
   "max_cycles": 3,
+  "timeout_factor": 2,
   "status": "PENDING",
   "owner": "orchestrator"
 }
