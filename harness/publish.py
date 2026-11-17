@@ -166,7 +166,7 @@ def public_report(run, state):
         tasks[tid] = {'status': t['status'], 'cycles': t['cycle'] if hist else 0, 'phases_attempted': len(hist),
                       'phases_failed': sum(1 for e in hist if e.get('failure_class')),
                       'agent_seconds': round(sum(e['seconds'] for e in hist), 1)}
-    keep = ('label', 'commit', 'eval_version', 'passed', 'due', 'total', 'categories', 'metrics', 'done_tasks', 'timestamp')
+    keep = ('label', 'commit', 'eval_version', 'passed', 'due', 'total', 'categories', 'metrics', 'balance', 'done_tasks', 'timestamp')
     evaluations = [{k: e[k] for k in keep if k in e} for e in state.get('evaluations', []) if 'error' not in e]
     row['evaluation'] = evaluations[-1] if evaluations else None
     return {**row, 'tasks': tasks, 'evaluations': evaluations}
@@ -217,6 +217,10 @@ def run_readme(report, artifact, release_url, harness_url):
                              [[core.label(k), v['passed'], v['total']] for k, v in ev['categories'].items()]), '']
         if ev['metrics'].get('ticks_per_second') is not None:
             lines += [f'Measured speed: {ev["metrics"]["ticks_per_second"]} ticks per second at about 2,000 individuals.', '']
+        if ev.get('balance'):
+            lines += ['Balance (how long plants, herbivores and carnivores coexist over 10,000 ticks; 0-100, in brackets the share of runs '
+                      f'with all three alive at the end): fixed world {core.fmt_balance(ev, "fixed")}, '
+                      f'the product\'s demo scenario {core.fmt_balance(ev, "demo")}. Collapse is allowed, so this is not a pass/fail check.', '']
         if len(report['evaluations']) > 1:
             lines += ['### Progress over the run', '',
                       core.table(['After', 'Tasks done', 'Checks passed', 'Checks due'],

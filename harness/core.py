@@ -1224,6 +1224,7 @@ def evaluate_run(run,state,label,commit='HEAD',done=None):
         result=read(out/'result.json')
         write(run.base/'eval'/f'{label}.json',{**record,**result})
         record.update({k:result[k] for k in ('eval_version','passed','due','total','categories','metrics')})
+        record['balance']=result.get('balance')
     except Exception as e:
         record['error']=f'{type(e).__name__}: {e}'[:400]
     finally:
@@ -1259,6 +1260,12 @@ def label(category):return 'UI' if category=='ui' else category.capitalize()
 def fmt_cost(v):return '—' if v is None else f'${v:.2f}'
 def fmt_pct(v):return '—' if v is None else f'{v*100:.0f}%'
 
+def fmt_balance(evaluation,which):
+    b=((evaluation or {}).get('balance') or {}).get(which)
+    if not b:return '—'
+    if b.get('missing'):return 'no demo'
+    return f"{b['score']} ({b['coexistence']*100:.0f}%)"
+
 def median(values):
     import statistics
     return None if not values or any(v is None for v in values) else statistics.median(values)
@@ -1286,10 +1293,13 @@ def comparison_markdown(rows):
         cats=list(scored[0]['evaluation']['categories'])
         out+=['','## Hidden test results','','Checks passed out of all checks in the suite, from the latest evaluation of each run. '
               'Checks belonging to tasks that are not done yet count as not passed. Speed is measured by the suite at about 2,000 individuals.','']
-        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[label(c) for c in cats]+['Ticks/s'],
+        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[label(c) for c in cats]+['Ticks/s','Balance','Demo balance'],
             [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
-             +[r['evaluation']['metrics'].get('ticks_per_second','—')] for r in scored]))
+             +[r['evaluation']['metrics'].get('ticks_per_second','—'),fmt_balance(r['evaluation'],'fixed'),fmt_balance(r['evaluation'],'demo')] for r in scored]))
+        out+=['','"Balance" measures how long plants, herbivores and carnivores coexist over 10,000 ticks (0-100, mean share of the run before the first kind dies out; '
+              'in brackets the share of runs with all three alive at the end), once in a fixed world with the product\'s default parameters and once in its own demo scenario. '
+              'Collapse is allowed by the task, so this is a figure for comparison, not a check.']
     seq={}
     for r in rows:
         if r['track']=='sequential' and r['finished']:seq.setdefault(r['profile'],[]).append(r['wall_seconds_agent_calls'])

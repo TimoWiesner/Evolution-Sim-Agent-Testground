@@ -225,7 +225,10 @@ class Integration(Base):
   row=core.summarize(core.read(self.run_.meta),self.s)
   self.assertEqual((row['evaluation']['label'],row['evaluations_failed']),('TASK-002',1))
   md=core.comparison_markdown([row])
-  self.assertIn('| sequential | fake | r1 | TASK-002 | 3/41 | 3/10 | 250.0 |',md)
+  self.assertIn('| sequential | fake | r1 | TASK-002 | 3/41 | 3/10 | 250.0 | — | — |',md)
+  self.s['evaluations'][0]['balance']={'fixed':{'score':37,'coexistence':1/6},'demo':{'score':0,'missing':True}}
+  md=core.comparison_markdown([core.summarize(core.read(self.run_.meta),self.s)])
+  self.assertIn('| 250.0 | 37 (17%) | no demo |',md)
 
 if __name__=='__main__':unittest.main()
 

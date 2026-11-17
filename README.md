@@ -169,6 +169,7 @@ Agents choose language, architecture and UI themselves, but every product must e
 - Runs must be deterministic per seed, a checkpoint resume must reproduce an uninterrupted run exactly, and extinct kinds must stay extinct.
 - `evosim ui --smoke-test` must start the real UI and exit cleanly.
 - `evosim ui --screenshots DIR` must write images of the real UI, which the results repository shows side by side.
+- `scenarios/demo.json` is the product's demo scenario; the README's demo command uses it.
 
 This makes products from different models testable with one black-box suite and packageable with one build step. Seven of the 27 tasks carry the matching acceptance criteria.
 
@@ -196,6 +197,8 @@ Reports and the comparison give, per run:
 - operator interventions (`unblock`)
 - agent wall time
 - tokens split into fresh input, cached input and output, and cost, where the CLI reports them
+
+- balance: how long plants, herbivores and carnivores coexist over 10,000 ticks, scored 0 to 100, once in a fixed world with the product's default parameters and once in its own demo scenario. The tasks allow collapse, so this is a figure for comparison, not a pass/fail check.
 
 Token counts are normalised across CLIs: cached input is listed separately because it dominates Claude Code's totals and is billed at a fraction of the price. Missing usage is shown as unknown, never as zero. Codex reports no cost. Speed and cost are separate columns and are never folded into a quality figure.
 

@@ -14,14 +14,15 @@ The review passes only if every point is met and shown by a test or a recorded c
 - Runs of at least 10,000 ticks complete for at least three seeds without errors; the results are recorded.
 - Randomised tests check the invariants over many seeds and configurations: birth/death accounting, value ranges, wrapping, determinism.
 - The whole test suite passes with the one documented command.
-- `README.md` covers installation, the `run`, `batch` and `ui` commands, the configuration parameters and one command that starts an interesting demo scenario.
+- `README.md` covers installation, the `run`, `batch` and `ui` commands, the configuration parameters and the one command that starts the demo scenario `scenarios/demo.json` (`docs/CONTRACT.md` section 7).
+- For the demo scenario and for a configuration with only the fixed keys, runs of 10,000 ticks with at least three seeds record how long plants, herbivores and carnivores coexisted; `README.md` states the result.
 - A self-audit lists every requirement of `docs/PROJECT.md` as met, partly met or missing, and the known limitations are stated openly.
 
 ## Your decisions
 Decide these yourself and write down what you chose and why.
 
 - Where the evidence is recorded (for example `docs/VERIFICATION.md`).
-- The demo scenario.
+- The demo scenario: aim for a world in which plants, herbivores and carnivores coexist as long as possible without forced anti-extinction, and record what you tried.
 
 ## Not part of this task
 - New features. Fix what the checks uncover; record what cannot be fixed.
