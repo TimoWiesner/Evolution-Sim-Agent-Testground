@@ -13,6 +13,13 @@ Build a 2-D raster simulation of climate, plants, herbivores and carnivores. Foo
 - Headless multi-seed and parameter batch runs with comparative statistics; visualization for population, births/deaths, diversity, genetic distributions/means and generation trends.
 - Unit, integration, regression, property-based and multi-thousand-tick tests; seed-based repeatability. Operator may evaluate manually and using external checks.
 
+## Extinction and stabilising mechanisms
+Populations may collapse, and the goal is still a food chain in which plants, herbivores and carnivores coexist for as long as possible. Reach it with ecology, not with rules that override it.
+
+- **Not allowed** ("forced anti-extinction"): creating organisms other than as the initial population or by reproduction; any rule that looks at how many members a kind or species has left (for example "below 10 animals nobody dies", or extra births or protection when a population is small); immortality; energy without a documented source.
+- **Allowed and encouraged**: local, natural mechanisms that every organism is subject to at all times, whatever the population size. Examples are cell resources that regenerate up to a limit, density-dependent growth, satiation, a handling time after a kill, hunting success that depends on how easy prey is to find, refuges or cover for prey, migration away from depleted cells, territories and competition among predators, and climate zones that make the world uneven. Evolution may change all of these.
+- A mechanism may react to what an organism can perceive or what is in its own cell (food, crowding, danger), never to global counts.
+
 ## Agent-owned architecture decisions (not prescribed)
 1. Language, runtime, framework and UI technology: anything that runs in the benchmark container (Python 3, Rust and Node are installed).
 2. Spatial neighbor-search data structure (must respect torus and grid).
