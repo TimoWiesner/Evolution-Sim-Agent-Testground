@@ -25,7 +25,8 @@
     "The demo scenario: aim for a world in which plants, herbivores and carnivores coexist as long as possible without forced anti-extinction, and record what you tried."
   ],
   "out_of_scope": [
-    "New features. Fix what the checks uncover; record what cannot be fixed."
+    "New features. Fix what the checks uncover; record what cannot be fixed.",
+    "Reaching coexistence (TASK-027): the demo scenario must exist and the measured coexistence must be stated, but no particular result is required."
   ],
   "phases": [
     "plan",

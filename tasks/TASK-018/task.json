@@ -16,7 +16,7 @@
     "Scenario tests: without plants, herbivores and then carnivores die out; without herbivores, carnivores die out; plants alone persist.",
     "For each kind, initial population + births − deaths equals the living population after every tick.",
     "With the default parameters, plants survive and reproduce on their own, and herbivores with plenty of plants survive and reproduce for several hundred ticks.",
-    "One documented command runs the default parameters for 10,000 ticks with at least five seeds and reports, per seed and kind, the tick at which the kind died out or that it survived; the results are recorded."
+    "One documented command (a test or a script; the command line comes in TASK-019) runs the default parameters for 10,000 ticks with at least five seeds and reports, per seed and kind, the tick at which the kind died out or that it survived; the results are recorded."
   ],
   "decisions": [
     "The order of the steps in a tick.",

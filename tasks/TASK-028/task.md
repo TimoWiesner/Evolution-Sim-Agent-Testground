@@ -26,3 +26,4 @@ Decide these yourself and write down what you chose and why.
 
 ## Not part of this task
 - New features. Fix what the checks uncover; record what cannot be fixed.
+- Reaching coexistence (TASK-027): the demo scenario must exist and the measured coexistence must be stated, but no particular result is required.
