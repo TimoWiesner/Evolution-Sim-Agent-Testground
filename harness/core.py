@@ -1317,7 +1317,8 @@ def fmt_balance(evaluation,which):
     b=((evaluation or {}).get('balance') or {}).get(which)
     if not b:return '—'
     if b.get('missing'):return 'no demo'
-    return f"{b['score']} ({b['coexistence']*100:.0f}%)"
+    failed=f"; {b['runs_failed']} of {b['runs']} runs failed" if b.get('runs_failed') else ''
+    return f"{b['score']} ({b['coexistence']*100:.0f}%{failed})"
 
 def median(values):
     import statistics
@@ -1351,7 +1352,7 @@ def comparison_markdown(rows):
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
              +[r['evaluation']['metrics'].get('ticks_per_second','—'),fmt_balance(r['evaluation'],'fixed'),fmt_balance(r['evaluation'],'demo')] for r in scored]))
         out+=['','"Balance" measures how long plants, herbivores and carnivores coexist over 10,000 ticks (0-100, mean share of the run before the first kind dies out; '
-              'in brackets the share of runs with all three alive at the end), once in a fixed world with the product\'s default parameters and once in its own demo scenario. '
+              'in brackets the share of runs with all three alive at the end; a run that fails or exceeds the time limit counts as 0), once in the contract\'s example configuration with the product\'s default parameters and once in its own demo scenario. '
               'Collapse is allowed by the task, so this is a figure for comparison, not a check.']
     seq={}
     for r in rows:

@@ -22,7 +22,7 @@ The review passes only if every point is met and shown by a test or a recorded c
 Decide these yourself and write down what you chose and why.
 
 - Which mechanisms and parameters to change.
-- How many trials to run and when to stop.
+- How many trials to run, how long and on how many seeds (only the baseline and the held-out check need the full 10,000 ticks), and when to stop.
 
 ## Not part of this task
 - Guaranteeing coexistence: this task passes on the points above, whatever the measured outcome. How long the food chain lasts is also measured by the benchmark.
