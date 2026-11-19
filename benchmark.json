@@ -21,7 +21,7 @@
   },
   "eval": {
     "path": "../Evolution-Sim-Agent-Eval",
-    "timeout_seconds": 3600
+    "timeout_seconds": 5400
   },
   "results": {
     "path": "../Evolution-Sim-Agent-Results"

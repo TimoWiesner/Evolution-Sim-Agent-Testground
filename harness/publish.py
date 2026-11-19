@@ -220,7 +220,7 @@ def run_readme(report, artifact, release_url, harness_url):
             lines += [f'Measured speed: {ev["metrics"]["ticks_per_second"]} ticks per second at about 2,000 individuals.', '']
         if ev.get('balance'):
             lines += ['Balance (how long plants, herbivores and carnivores coexist over 10,000 ticks; 0-100, in brackets the share of runs '
-                      f'with all three alive at the end; a failed or too slow run counts as 0): '
+                      f'with all three alive at the end; a failed run counts as 0, runs over the time limit are left out and listed): '
                       f'example configuration {core.fmt_balance(ev, "fixed")}, '
                       f'the product\'s demo scenario {core.fmt_balance(ev, "demo")}. Collapse is allowed, so this is not a pass/fail check.', '']
         if len(report['evaluations']) > 1:
