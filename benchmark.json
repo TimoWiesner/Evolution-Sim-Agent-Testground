@@ -45,7 +45,7 @@
     "claude-sonnet": { "cli": "claude", "model": "sonnet" },
     "claude-haiku": { "cli": "claude", "model": "haiku" },
     "gpt-luna": { "cli": "codex", "model": "gpt-6-luna" },
-    "gpt-terra": { "cli": "codex", "model": "gpt-5.6-terra" },
+    "gpt-terra": { "cli": "codex", "model": "gpt-6.1-terra" },
     "gpt-sol": { "cli": "codex", "model": "gpt-6.1-sol" },
     "gpt-astra": { "cli": "codex", "model": "gpt-6-astra" },
     "local-qwen": {
