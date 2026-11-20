@@ -1,4 +1,5 @@
 """End-to-end harness test using a fake CLI; no provider credentials needed."""
+import datetime as dt
 import json
 import os
 import pathlib
@@ -94,6 +95,21 @@ class Integration(Base):
   out=json.dumps({'type':'rate_limit_event','rate_limit_info':{'status':'rejected','resetsAt':123}})
   self.assertEqual(core.rate_limited('claude',out),{'resets_at':123})
   self.assertIsNone(core.rate_limited('claude',out.replace('rejected','allowed_warning')))
+ def test_codex_reset_time_is_read_from_the_message(self):
+  utc=lambda *a:dt.datetime(*a,tzinfo=dt.timezone.utc).timestamp()
+  now=utc(2026,11,20,10,57)
+  msg='You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 11:43 AM.'
+  self.assertEqual(core.codex_reset(msg,now),utc(2026,11,20,11,43))
+  self.assertEqual(core.codex_reset(msg.replace('11:43 AM','1:05 PM'),now),utc(2026,11,20,13,5))
+  self.assertEqual(core.codex_reset(msg.replace('11:43 AM','9:00 AM'),now),utc(2026,11,21,9,0))
+  self.assertEqual(core.codex_reset(msg.replace('11:43 AM','10:55 AM'),now),utc(2026,11,20,10,55))
+  self.assertEqual(core.codex_reset(msg.replace('11:43 AM','Nov 23rd, 2026 3:00 PM'),now),utc(2026,11,23,15,0))
+  self.assertEqual(core.codex_reset('Rate limit reached, try again in 2 hours 5 minutes',now),now+7500)
+  self.assertIsNone(core.codex_reset('usage limit reached',now))
+  out='\n'.join(json.dumps({'type':t,'message':msg},ensure_ascii=False) for t in ('error','turn.failed'))
+  with patch.object(core.time,'time',return_value=now):
+   self.assertEqual(core.rate_limited('codex',out),{'resets_at':utc(2026,11,20,11,43)})
+  self.assertEqual(core.rate_limited('codex',json.dumps({'type':'error','message':'usage limit'})),{'resets_at':None})
  def test_outage_is_repeated_then_stops_the_run(self):
   with patch.dict(os.environ,{'FAKE_OUTAGE':'1','FAKE_MISSING':'1'}):
    for i in range(4):

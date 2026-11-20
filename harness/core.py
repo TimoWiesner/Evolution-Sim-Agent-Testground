@@ -470,10 +470,42 @@ def usage(cli, out):
 
 LIMIT_WORDS = re.compile(r'usage limit|rate.?limit|too many requests|\b429\b|quota',re.I)
 
-def rate_limited(cli, out):
+RETRY_AT = re.compile(r'try again at (?:(?P<mon>[A-Z][a-z]{2}) (?P<day>\d{1,2})(?:st|nd|rd|th)?,? (?P<year>\d{4}),? )?'
+                      r'(?P<hour>\d{1,2}):(?P<min>\d{2}) ?(?P<ampm>[AP]M)',re.I)
+RETRY_IN = re.compile(r'try again in ((?:\d+ ?(?:days?|hours?|hrs?|minutes?|mins?|seconds?|secs?|[dhms])[ ,and]*)+)',re.I)
+UNIT_SECONDS = {'d':86400,'h':3600,'m':60,'s':1}
+
+def codex_reset(text, now=None, utc=True):
+    """Reset time (epoch seconds) from a Codex usage-limit message, or None when it names none.
+
+    Codex prints the reset in the clock of the machine it runs on ("try again at 11:43 AM", with
+    the date when it is not today); inside the container that clock is UTC. A time without a date
+    that has already passed by more than a few minutes means the next day."""
+    now=time.time() if now is None else now
+    m=RETRY_AT.search(text)
+    if m:
+        tz=dt.timezone.utc if utc else None
+        base=dt.datetime.fromtimestamp(now,tz)
+        hour=int(m['hour'])%12+(12 if m['ampm'].upper()=='PM' else 0)
+        try:
+            if m['year']:
+                day=dt.datetime.strptime(f"{m['mon']} {m['day']} {m['year']}",'%b %d %Y').date()
+            else:day=base.date()
+            at=dt.datetime.combine(day,dt.time(hour,int(m['min'])),tz)
+        except ValueError:return None
+        if not m['year'] and at.timestamp()<now-300:at+=dt.timedelta(days=1)
+        return at.timestamp()
+    m=RETRY_IN.search(text)
+    if m:
+        secs=sum(int(n)*UNIT_SECONDS[u[0].lower()] for n,u in re.findall(r'(\d+) ?([a-z]+)',m[1],re.I) if u[0].lower() in UNIT_SECONDS)
+        return now+secs if secs else None
+    return None
+
+def rate_limited(cli, out, utc=True):
     """Did the provider refuse this call because a usage or rate limit was reached?
 
-    Returns None, or a dict with `resets_at` (epoch seconds, None when the CLI does not say)."""
+    Returns None, or a dict with `resets_at` (epoch seconds, None when the CLI does not say).
+    `utc`: the CLI ran with a UTC clock (in the container); otherwise times are in host local time."""
     hit=False;resets=None
     for line in out.splitlines():
         try:o=json.loads(line)
@@ -485,7 +517,10 @@ def rate_limited(cli, out):
                 hit=True
                 if isinstance(info.get('resetsAt'),(int,float)):resets=max(resets or 0,info['resetsAt'])
             if o.get('type')=='result' and o.get('api_error_status')==429:hit=True
-        elif o.get('type') in ('error','turn.failed') and LIMIT_WORDS.search(json.dumps(o)):hit=True
+        elif o.get('type') in ('error','turn.failed') and LIMIT_WORDS.search(text:=json.dumps(o,ensure_ascii=False)):
+            hit=True
+            at=codex_reset(text,utc=utc) if cli=='codex' else None
+            if at:resets=max(resets or 0,at)
     return {'resets_at':resets} if hit else None
 
 AUTH_WORDS = re.compile(r'\b401\b|\b403\b|unauthori[sz]ed|authenticat|not logged in|/login|token (has )?expired|invalid api key',re.I)
@@ -604,7 +639,7 @@ def refused(run,state,task,phase,cycle,label,r,hand_ok):
     """Was this call stopped by a limit or an outage? Then it is noted and repeated, not judged."""
     if hand_ok and r['exit_code']==0:return False
     u=usage(run.cli,r['output'])
-    limit=rate_limited(run.cli,r['output'])
+    limit=rate_limited(run.cli,r['output'],utc=bool(run.container))
     if limit:note_rate_limit(state,run.cfg,task,phase,cycle,limit,label,r,u);return True
     info=infra_failure(run.cli,r,u)
     if info:note_infra(run,state,task,phase,cycle,info,label,r,u);return True
