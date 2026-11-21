@@ -118,6 +118,14 @@ class Integration(Base):
   with patch.object(core.time,'time',return_value=now):
    self.assertEqual(core.rate_limited('codex',out),{'resets_at':utc(2026,11,20,11,43)})
   self.assertEqual(core.rate_limited('codex',json.dumps({'type':'error','message':'usage limit'})),{'resets_at':None})
+ def test_restart_after_a_long_limit_clears_the_old_pause(self):
+  with patch.dict(os.environ,{'FAKE_LIMIT':'1','FAKE_MISSING':'1'}):self.assertFalse(self.phase())
+  self.s['paused_until']=core.time.time()+3*86400
+  self.assertFalse(core.wait_for_limit(self.s,self.run_.cfg))
+  self.assertTrue(self.s['paused_until'])
+  core.begin_invocation(self.s)
+  self.assertIsNone(self.s['paused_until']);self.assertNotIn('pause_reason',self.s)
+  self.assertTrue(self.phase());self.assertFalse(self.s.get('paused_until'))
  def test_outage_is_repeated_then_stops_the_run(self):
   with patch.dict(os.environ,{'FAKE_OUTAGE':'1','FAKE_MISSING':'1'}):
    for i in range(4):

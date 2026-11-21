@@ -703,9 +703,10 @@ def blocked_kind(task):
     return 'review' if (task.get('blocked_reason') or '').startswith('REVIEW_GAPS') else 'error'
 
 def begin_invocation(state):
-    """A fresh start of `run`: the operator has looked at it, so earlier stops and outage waits are over."""
+    """A fresh start of `run`: the operator has looked at it, so earlier stops, outage waits and limit
+    pauses are over. A limit that still holds refuses the next call, which sets a new pause."""
     state.pop('halt',None);clear_streaks(state)
-    if state.get('pause_reason')=='infra':state['paused_until']=None;state.pop('pause_reason',None)
+    state['paused_until']=None;state.pop('pause_reason',None)
 
 def short_event(cli, line):
     try:o=json.loads(line)
