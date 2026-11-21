@@ -51,6 +51,14 @@ class Base(unittest.TestCase):
 class Integration(Base):
  def phase(self):
   return core.execute_phase(self.run_,self.s,'TASK-001',live=False)
+ def test_skills_are_outside_cli_skill_discovery(self):
+  self.assertFalse((self.w/'.agents').exists())
+  for phase in core.PHASES:
+   self.assertTrue((self.w/core.SKILLS_DIR/phase/'SKILL.md').is_file())
+   self.assertIn(f'{core.SKILLS_DIR}/{phase}/SKILL.md',core.prompt_for('TASK-001',phase,1,str(self.w)))
+  self.assertNotIn('.agents/skills',(self.w/'AGENTS.md').read_text()+(self.w/'CLAUDE.md').read_text())
+  (self.w/core.SKILLS_DIR/'plan'/'SKILL.md').write_text('changed')
+  self.assertFalse(core.protected_ok(self.w)[0]);core.restore_protected(self.w);self.assertTrue(core.protected_ok(self.w)[0])
  def test_three_phases_and_local_git(self):
   for _ in core.PHASES:
    self.assertTrue(self.phase())

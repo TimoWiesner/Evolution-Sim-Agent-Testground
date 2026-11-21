@@ -151,7 +151,7 @@ Codex runs without `--ephemeral` in this track, because its subagents need a sto
 ## Layout
 
 - `tasks/TASK-*/task.md` and `task.json`: task specifications.
-- `skills/{plan,implement,review}/SKILL.md`: phase instructions copied into each workspace.
+- `skills/{plan,implement,review}/SKILL.md`: phase instructions copied into each workspace as `.bench/skills/`, a folder no CLI scans for skills on its own; the phase prompt names the file.
 - `starter/`: initial project files, `AGENTS.md`, `CLAUDE.md` and the interface contract `docs/CONTRACT.md`.
 - `harness/core.py`: runner, CLI adapters, container isolation, evaluation and comparison.
 - `harness/publish.py`: packaging and publishing of finished runs.

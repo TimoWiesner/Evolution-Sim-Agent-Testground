@@ -1,6 +1,6 @@
 # Agent contract
 
-You are implementing Evolution Simulation, a locally runnable grid-world ecological evolution game. Read `docs/PROJECT.md`, `docs/CONTRACT.md`, `docs/STATE.md`, `docs/ARCHITECTURE.md`, task spec in `tasks/`, relevant `docs/decisions/`, then the *current* phase skill in `.agents/skills/{plan,implement,review}/SKILL.md`.
+You are implementing Evolution Simulation, a locally runnable grid-world ecological evolution game. Read `docs/PROJECT.md`, `docs/CONTRACT.md`, `docs/STATE.md`, `docs/ARCHITECTURE.md`, task spec in `tasks/`, relevant `docs/decisions/`, then the *current* phase skill in `.bench/skills/{plan,implement,review}/SKILL.md`.
 
 ## Scope and hard rules
 - Follow the task's goal, its "Must have" points (the acceptance criteria) and the three-phase workflow; never silently skip behavior.
@@ -12,7 +12,7 @@ You are implementing Evolution Simulation, a locally runnable grid-world ecologi
 - Deterministic or seed-based simulation; minor inter-platform differences allowed. UI and headless modes share the same engine. No arbitrary hardcoded population replenishment.
 - Add tests, run them, report exact command and result; don't fabricate success.
 - `docs/CONTRACT.md` fixes the product's external interface (`./setup.sh`, `./evosim`, `./build.sh`, configuration keys, result JSON). It is binding and is how the product is evaluated; everything behind it is your design.
-- Do not modify `AGENTS.md`, `CLAUDE.md`, `docs/CONTRACT.md`, `.agents/skills/`, task specifications, or benchmark reference checks. Harness owns task states, commits and stage transitions.
+- Do not modify `AGENTS.md`, `CLAUDE.md`, `docs/CONTRACT.md`, `.bench/skills/`, task specifications, or benchmark reference checks. Harness owns task states, commits and stage transitions.
 - Keep `docs/STATE.md`, `docs/ARCHITECTURE.md`, and ADRs current. Phase handoffs are the primary cross-session memory.
 - Ask no interactive questions; make reasonable engineering decisions and document them.
 

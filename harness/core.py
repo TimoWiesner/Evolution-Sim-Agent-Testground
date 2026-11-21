@@ -32,6 +32,9 @@ LOGIN_FILES = {
 }
 LOGIN_REQUIRED = ('claude','codex')
 PROTECTED_STARTER = ('AGENTS.md','CLAUDE.md','docs/CONTRACT.md')
+# Phase skills live where no CLI looks for skills on its own (Codex scans .agents/skills and rejects files
+# without YAML frontmatter). Every CLI reads them only because the phase prompt names the path.
+SKILLS_DIR = '.bench/skills'
 REQUIRED = ('summary','changed_files','decisions','tests','risks','next_steps','verdict','gaps')
 
 def read(path):
@@ -281,7 +284,7 @@ def protected_manifest():
 
 def protected_ok(w):
     for name, digest in protected_manifest().items():
-        dest = w / ('.agents/skills/'+name[7:] if name.startswith('skills/') else name)
+        dest = w / (SKILLS_DIR+'/'+name[7:] if name.startswith('skills/') else name)
         if not dest.is_file() or sha(dest) != digest:
             return False, str(dest)
     # Unexpected task specifications are forbidden; generated handoffs are allowed.
@@ -344,7 +347,7 @@ def init(run):
     run.base.mkdir(parents=True)
     shutil.copytree(ROOT/'starter',w)
     shutil.copytree(ROOT/'tasks',w/'tasks')
-    shutil.copytree(ROOT/'skills',w/'.agents'/'skills')
+    shutil.copytree(ROOT/'skills',w/SKILLS_DIR)
     git(w,'init','-q')
     git(w,'config','user.name',run.cfg['git_author_name'])
     git(w,'config','user.email',run.cfg['git_author_email'])
@@ -870,7 +873,7 @@ def prompt_for(task,phase,cycle,w=None,sandbox=False,parallel=False,delegate=Fal
             f'Task {task}, phase {phase.upper()}, cycle {cycle}. '
             f'Read AGENTS.md, docs/PROJECT.md, docs/CONTRACT.md, docs/STATE.md, docs/ARCHITECTURE.md, '
             f'tasks/{task}/task.md, tasks/{task}/task.json, existing task handoffs, dependent task handoffs, '
-            f'and .agents/skills/{phase}/SKILL.md. Follow that skill. '
+            f'and {SKILLS_DIR}/{phase}/SKILL.md. Follow that skill. '
             f'Before returning, write a VALID UTF-8 JSON handoff to this ABSOLUTE file path: {hand}. '
             f'The handoff MUST include task_id, phase, cycle (integer), summary, changed_files, '
             f'decisions, tests, risks, next_steps, verdict, gaps. verdict N/A unless review (PASS or FAIL). '
@@ -939,7 +942,7 @@ def restore_protected(w):
     """Put benchmark-owned files back; the violation stays visible in the event and raw logs."""
     for name in protected_manifest():
         source=(ROOT/'skills'/name[7:]) if name.startswith('skills/') else ((ROOT/name) if name.startswith('tasks/') else ROOT/'starter'/name)
-        dest=w/('.agents/skills/'+name[7:] if name.startswith('skills/') else name)
+        dest=w/(SKILLS_DIR+'/'+name[7:] if name.startswith('skills/') else name)
         dest.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(source,dest)
 
