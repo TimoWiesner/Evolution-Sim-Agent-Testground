@@ -1,4 +1,4 @@
-# Evolution Agent Benchmark v1
+# Evolution Agent Benchmark v2
 
 A testing ground for agentic coding. Each coding agent is given the same 28 dependent tasks and has to build an evolution simulation from an empty starter project. The harness drives cloud models (Claude Code, Codex) and local models (through opencode) in exactly the same way, so their results can be compared.
 
@@ -51,7 +51,7 @@ A profile is a named combination of CLI, model and settings in `benchmark.json`.
 
 Local models are any OpenAI-compatible endpoint (llama.cpp, Ollama, LM Studio) registered as a provider in your opencode configuration; the profile names it as `provider/model`.
 
-A run is locked to the profile settings it started with. If you change a profile, start a new run with `--run-id`; the harness refuses to continue the old one, so no run can mix models.
+A run is locked to the profile settings it started with. If you change a profile, start a new run with `--run-id`; the harness refuses to continue the old one, so no run can mix models. The same holds for the benchmark version (`benchmark_version` in `run.json`): a run started under another version is not continued, and `compare` keeps versions apart. What changed between versions is listed in [docs/BENCHMARK.md](docs/BENCHMARK.md#versions).
 
 ## Runs
 

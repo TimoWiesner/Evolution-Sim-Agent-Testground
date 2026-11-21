@@ -10,7 +10,7 @@ Create a runnable, still empty project skeleton with the three entry points and 
 The review passes only if every point is met and shown by a test or a recorded command.
 
 - `./setup.sh`, `./evosim` and `./build.sh` exist as defined in `docs/CONTRACT.md` section 1
-- `./evosim version` prints the contract JSON after `./setup.sh` in a fresh container
+- `./evosim version` prints the contract JSON after `./setup.sh` in a clean checkout of the repository (for example `git clone` into an empty directory). The harness checks the same in a fresh container that it provides; the agent does not start containers itself.
 - `./build.sh` produces `dist/evosim` and `dist/evosim version` works
 - `./evosim --help` lists the available commands; an unknown command gives exit status 2.
 - One documented command runs the whole test suite; at least one test exists and passes.

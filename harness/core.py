@@ -15,7 +15,7 @@ import threading
 import time
 from contextlib import contextmanager
 
-BENCHMARK_VERSION = 1
+BENCHMARK_VERSION = 2
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PHASES = ('plan', 'implement', 'review')
 TRACKS = ('sequential','parallel','subagents')
@@ -163,6 +163,11 @@ def check_unchanged(run):
     if stored['fingerprint'] != fingerprint(run.profile):
         raise RuntimeError(f'Profile {run.name!r} changed since this run started '
                            f'(was {stored["settings"]}). Start a new run with --run-id.')
+    version = stored.get('benchmark_version', 1)
+    if version != BENCHMARK_VERSION:
+        # Resuming would restore this version's task texts into a workspace started with another.
+        raise RuntimeError(f'This run was started with benchmark version {version}, the harness is version {BENCHMARK_VERSION}. '
+                           f'Start a new run with --run-id.')
     mode = 'container' if run.container else 'host'
     if stored.get('isolation','host') != mode:
         raise RuntimeError(f'This run was started in {stored.get("isolation","host")} mode, not {mode} mode. '
@@ -1372,23 +1377,23 @@ def comparison_markdown(rows):
     """Speed and cost are separate columns and never folded into a quality figure."""
     if not rows:return '# Benchmark comparison\n\nNo runs found.\n'
     groups={}
-    for r in rows:groups.setdefault((r['track'],r['profile']),[]).append(r)
-    out=['# Benchmark comparison','',f'{len(rows)} run(s), {len(groups)} profile/track combination(s). '
+    for r in rows:groups.setdefault((r['benchmark_version'],r['track'],r['profile']),[]).append(r)
+    out=['# Benchmark comparison','',f'{len(rows)} run(s), {len(groups)} version/profile/track combination(s). '
          '"—" means the CLI did not report the value; it is never counted as zero. '
-         'With more than one run, the summary shows the median.','','## Summary by profile and track','']
-    out.append(table(['Track','Profile','Model','Runs','Tasks done','First-cycle pass','Failed phases','Agent time','Fresh input','Cached input','Output','Cost'],
-        [[track,profile,g[0]['model'] or 'CLI default',len(g),fmt_pct(median([r['completed_ratio'] for r in g])),fmt_pct(median([r['first_cycle_pass_ratio'] for r in g])),
+         'With more than one run, the summary shows the median.','','## Summary by version, profile and track','']
+    out.append(table(['Version','Track','Profile','Model','Runs','Tasks done','First-cycle pass','Failed phases','Agent time','Fresh input','Cached input','Output','Cost'],
+        [[version,track,profile,g[0]['model'] or 'CLI default',len(g),fmt_pct(median([r['completed_ratio'] for r in g])),fmt_pct(median([r['first_cycle_pass_ratio'] for r in g])),
           fmt_count(median([r['phases_failed'] for r in g])),fmt_time(median([r['wall_seconds_agent_calls'] for r in g])),
           fmt_count(median([r['reported_input_tokens'] for r in g])),fmt_count(median([r['reported_cached_input_tokens'] for r in g])),
           fmt_count(median([r['reported_output_tokens'] for r in g])),at_least(fmt_cost(median([r['reported_total_cost_usd'] for r in g])),sum(r.get('phases_without_cost',0) for r in g))]
-         for (track,profile),g in sorted(groups.items())]))
+         for (version,track,profile),g in sorted(groups.items())]))
     scored=[r for r in rows if r['evaluation']]
     if scored:
         cats=list(scored[0]['evaluation']['categories'])
         out+=['','## Hidden test results','','Checks passed out of all checks in the suite, from the latest evaluation of each run. '
               'Checks belonging to tasks that are not done yet count as not passed. Speed is measured by the suite at about 2,000 individuals.','']
-        out.append(table(['Track','Profile','Run','Evaluated after','All checks']+[label(c) for c in cats]+['Ticks/s','Balance','Demo balance'],
-            [[r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
+        out.append(table(['Version','Track','Profile','Run','Evaluated after','All checks']+[label(c) for c in cats]+['Ticks/s','Balance','Demo balance'],
+            [[r['benchmark_version'],r['track'],r['profile'],r['run_id'],r['evaluation']['label'],f"{r['evaluation']['passed']}/{r['evaluation']['total']}"]
              +[f"{r['evaluation']['categories'][c]['passed']}/{r['evaluation']['categories'][c]['total']}" if c in r['evaluation']['categories'] else '—' for c in cats]
              +[r['evaluation']['metrics'].get('ticks_per_second','—'),fmt_balance(r['evaluation'],'fixed'),fmt_balance(r['evaluation'],'demo')] for r in scored]))
         out+=['','"Balance" measures how long plants, herbivores and carnivores coexist over 10,000 ticks (0-100, mean share of the run before the first kind dies out; '
@@ -1421,8 +1426,8 @@ def comparison_markdown(rows):
             [[r['profile'],r['run_id'],r['workers'],fmt_time(r['elapsed_seconds']),fmt_time(r['wall_seconds_agent_calls']),r['parallelism'] if r['parallelism'] is not None else '—',speedup(r),
               r['merges'],r['merge_conflicts'],r['merge_conflict_files'],r['merges_failed'],fmt_time(r['merge_agent_seconds'])] for r in par]))
     out+=['','## Every run','']
-    out.append(table(['Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
-        [[r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",fmt_blocked(r),
+    out.append(table(['Version','Track','Profile','Run','State','Done','Blocked','Phases','Failed','Interventions','Agent time','Tokens','Cost','Reported model','CLI','Isolation','Harness'],
+        [[r['benchmark_version'],r['track'],r['profile'],r['run_id'],'finished' if r['finished'] else 'in progress',f"{r['status_counts']['DONE']}/{r['tasks_total']}",fmt_blocked(r),
           r['phases_attempted'],r['phases_failed'],r['operator_interventions'],fmt_time(r['wall_seconds_agent_calls']),at_least(fmt_count(r['reported_total_tokens']),r.get('phases_without_tokens')),at_least(fmt_cost(r['reported_total_cost_usd']),r.get('phases_without_cost')),
           ', '.join(r['reported_models']) or '—',r['cli_version'] or r['cli'],r['isolation'],(r['harness_commit'] or '—')[:7]+('*' if (r['harness_commit'] or '').endswith('-dirty') else '')]
          for r in rows]))

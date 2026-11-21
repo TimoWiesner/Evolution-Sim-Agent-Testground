@@ -181,6 +181,7 @@ def run_readme(report, artifact, release_url, harness_url):
                  ['Model', ', '.join(report['reported_models']) or report['model'] or 'CLI default'],
                  ['Agent CLI', report['cli_version'] or report['cli']],
                  ['Track', report['track']],
+                 ['Benchmark version', report['benchmark_version']],
                  ['Started', report['created'][:10]],
                  ['State', 'finished' if report['finished'] else 'in progress'],
                  ['Tasks done', f'{c["DONE"]} of {report["tasks_total"]} ({core.fmt_blocked(report)} blocked)'],

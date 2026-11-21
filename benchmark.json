@@ -1,5 +1,5 @@
 {
-  "benchmark_version": 1,
+  "benchmark_version": 2,
   "runs_root": "~/evo-runs",
   "max_cycles": 3,
   "recovery_attempts": 1,

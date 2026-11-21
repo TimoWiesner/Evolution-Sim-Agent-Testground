@@ -217,7 +217,7 @@ class Integration(Base):
  def test_run_layout_and_metadata(self):
   self.assertEqual(self.run_.base,pathlib.Path(self.tmp.name)/'runs'/'fake'/'sequential'/'r1')
   meta=core.read(self.run_.meta)
-  self.assertEqual((meta['profile'],meta['model'],meta['track'],meta['benchmark_version']),('fake','fake/model-a','sequential',1))
+  self.assertEqual((meta['profile'],meta['model'],meta['track'],meta['benchmark_version']),('fake','fake/model-a','sequential',2))
   self.assertIn('cpu_count',meta['host'])
  def test_separate_runs_do_not_collide(self):
   other=core.Run('fake',run_id='r2');core.init(other)
@@ -228,6 +228,18 @@ class Integration(Base):
   core.write(self.root/'benchmark.json',cfg)
   with self.assertRaises(RuntimeError):
    core.check_unchanged(core.Run('fake'))
+ def test_run_of_another_benchmark_version_is_not_resumed(self):
+  meta=core.read(self.run_.meta);meta['benchmark_version']=core.BENCHMARK_VERSION-1;core.write(self.run_.meta,meta)
+  with self.assertRaisesRegex(RuntimeError,'benchmark version'):core.check_unchanged(self.run_)
+ def test_compare_keeps_benchmark_versions_apart(self):
+  a=core.summarize(core.read(self.run_.meta),self.s);b={**a,'benchmark_version':1,'run_id':'old'}
+  md=core.comparison_markdown([a,b])
+  self.assertIn('2 version/profile/track combination(s)',md);self.assertIn('different benchmark versions',md)
+ def test_version_2_texts_do_not_ask_for_a_container_the_agent_cannot_start(self):
+  self.assertEqual(core.read(core.ROOT/'benchmark.json')['benchmark_version'],core.BENCHMARK_VERSION)
+  for p in ('tasks/TASK-002/task.md','tasks/TASK-002/task.json'):
+   t=(core.ROOT/p).read_text();self.assertIn('clean checkout',t);self.assertIn('does not start containers itself',t)
+  self.assertIn('agents cannot start containers',(core.ROOT/'starter/docs/CONTRACT.md').read_text())
  def test_runs_root_inside_repo_is_rejected(self):
   cfg=core.read(self.root/'benchmark.json');cfg['runs_root']=str(self.root/'runs')
   with self.assertRaises(RuntimeError):

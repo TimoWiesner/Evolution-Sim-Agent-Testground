@@ -10,7 +10,7 @@ Three executable files at the workspace root. All are non-interactive, work from
 
 | File | Purpose |
 |---|---|
-| `./setup.sh` | Installs and builds everything the product needs. Must succeed as root in a fresh benchmark container (Ubuntu 24.04 x86-64 with Python 3, Rust, Node and build tools) given only the workspace and internet access. Idempotent. |
+| `./setup.sh` | Installs and builds everything the product needs. Must succeed as root in a fresh benchmark container (Ubuntu 24.04 x86-64 with Python 3, Rust, Node and build tools) given only the workspace and internet access. The harness provides that container when it evaluates; agents cannot start containers inside the sandbox and check this with a clean checkout instead. Idempotent. |
 | `./evosim` | Launcher for the commands in section 2. Must work after `./setup.sh` has run once. |
 | `./build.sh` | Produces the distributable in `dist/` (section 6). May assume `./setup.sh` has run. |
 

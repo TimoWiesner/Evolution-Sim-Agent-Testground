@@ -12,3 +12,13 @@ Modularity/interfaces; readability/testability; faithful simulation design; gene
 
 ## Safety / integrity
 External checks are operator-owned and not copied to workspace. Automatic checks include handoff validation and safe noninteractive smoke verification; stronger acceptance scripts should be supplied by evaluator after implementation language emerges. CLI self-tests are not proof of correct physics. Treat speed >=100 ticks/s at 2k entities as a target to measure under recorded hardware, not a portable global invariant.
+
+## Versions
+
+Runs are only directly comparable within one benchmark version. The version is stored in each run's `run.json`; `compare` groups and labels runs by it.
+
+- **Version 1** (until 2026-11-21): all runs up to and including `gpt-astra/sequential/r1`.
+- **Version 2** (2026-11-21): two wording clarifications, nothing else changed (other tasks, skills, prompt and hidden suite are the same).
+  - TASK-002: "`./evosim version` prints the contract JSON after `./setup.sh` in a fresh container" now reads "... in a clean checkout of the repository (for example `git clone` into an empty directory). The harness checks the same in a fresh container that it provides; the agent does not start containers itself."
+  - `docs/CONTRACT.md`, `./setup.sh`: adds "The harness provides that container when it evaluates; agents cannot start containers inside the sandbox and check this with a clean checkout instead."
+  - Reason: in `gpt-astra/sequential/r1` the model read "fresh container" literally, tried to start a container inside the sandbox (not possible there) and failed TASK-002 review in four cycles, so 26 tasks never started. Every other profile had passed the same criterion in the first cycle.
