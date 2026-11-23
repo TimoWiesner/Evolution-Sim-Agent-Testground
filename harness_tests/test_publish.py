@@ -46,6 +46,8 @@ class PublishTests(unittest.TestCase):
   md=publish.run_readme(REPORT,art,None,None)
   self.assertIn('![main](screenshots/main.png)',md);self.assertIn('![charts-view](screenshots/charts-view.png)',md)
   self.assertIn('wrote no screenshots',publish.run_readme(REPORT,{'build_ok':False},None,None))
+  self.assertIn('[ANALYSIS.md](ANALYSIS.md)',publish.index_readme([REPORT],None,None,['ANALYSIS.md']))
+  self.assertNotIn('Written analyses',publish.index_readme([REPORT],None,None))
   idx=publish.index_readme([{**REPORT,'screenshot':'screenshots/main.png'}],None,None)
   self.assertIn('## Interfaces',idx);self.assertIn('(results/p/sequential/r1/screenshots/main.png)',idx)
   self.assertNotIn('## Interfaces',publish.index_readme([REPORT],None,None))

@@ -256,13 +256,16 @@ def run_readme(report, artifact, release_url, harness_url):
     return '\n'.join(lines)
 
 
-def index_readme(reports, harness_url, repo_url):
+def index_readme(reports, harness_url, repo_url, analyses=()):
     body = core.comparison_markdown(reports).split('\n', 2)[2] if reports else '\nNo runs published yet.\n'
     lines = ['# Evolution Agent Benchmark: results', '',
              f'Published runs of the [Evolution Agent Benchmark]({harness_url or "#"}). Each coding agent, cloud or local, '
              'gets the same 28 dependent tasks and has to build an evolution simulation from an empty project on its own. '
              'Quality is scored by a private black-box test suite the agents never see.', '',
-             'This page is generated; do not edit it by hand.', body, '## Runs', '']
+             'This page is generated; do not edit it by hand.', '']
+    if analyses:
+        lines += ['Written analyses: ' + ', '.join(f'[{a}]({a})' for a in analyses) + '.', '']
+    lines += [body, '## Runs', '']
     for r in reports:
         folder = f'results/{r["profile"]}/{r["track"]}/{r["run_id"]}'
         link = f' · [executable]({repo_url}/releases/tag/{r["profile"]}-{r["track"]}-{r["run_id"]})' if repo_url and r.get('has_asset') else ''
@@ -284,7 +287,8 @@ def rebuild_index(results):
         r['has_asset'] = art.exists() and core.read(art).get('build_ok', False)
         r['screenshot'] = 'screenshots/main.png' if f.with_name('screenshots').joinpath('main.png').is_file() else None
         reports.append(r)
-    (results / 'README.md').write_text(index_readme(reports, github_url(core.ROOT), github_url(results)), encoding='utf-8')
+    analyses = sorted(p.name for p in results.glob('ANALYSIS*.md'))
+    (results / 'README.md').write_text(index_readme(reports, github_url(core.ROOT), github_url(results), analyses), encoding='utf-8')
     core.write(results / 'comparison.json', {'generated': core.now(), 'runs': reports})
     return reports
 
