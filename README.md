@@ -1,4 +1,4 @@
-# Evolution Agent Benchmark v2
+# Evolution Agent Benchmark v2 (WIP)
 
 A testing ground for agentic coding. Each coding agent is given the same 28 dependent tasks and has to build an evolution simulation from an empty starter project. The harness drives cloud models (Claude Code, Codex) and local models (through opencode) in exactly the same way, so their results can be compared.
 
@@ -6,7 +6,7 @@ Every task runs through three phases, PLAN, IMPLEMENT and REVIEW. Each phase is 
 
 Agents run inside a rootless Podman container that sees only its own workspace, so unattended runs are safe on a normal machine.
 
-> Status: the harness and all three tracks (sequential, parallel, subagents) are built. Full benchmark runs are still to come.
+> Status: the harness and all three tracks (sequential, parallel, subagents) are built. Benchmarks for an initial run v1 are present but exposed some gaps in the testground instruction-set.
 
 Published results: [Evolution-Sim-Agent-Results](https://github.com/TimoWiesner/Evolution-Sim-Agent-Results).
 
